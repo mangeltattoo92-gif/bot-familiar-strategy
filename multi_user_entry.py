@@ -56,7 +56,7 @@ from paper_trading.engine import (
     record_trade,
     update_settings,
 )
-from paper_trading.family_sizing import select_affordable_contract
+from paper_trading.family_sizing import estimate_affordable_symbols, select_affordable_contract
 from paper_trading.option_selection import MAX_SPREAD_PCT
 from paper_trading.singleton_lock import acquire_single_instance_lock
 from webapp import market_data
@@ -100,7 +100,7 @@ def active_accounts() -> list[tuple[str, Path]]:
     datos sola con el balance placeholder si todavia no existe (se
     registro y activo pero nunca abrio su panel web)."""
     accounts = []
-    for u in list_all_users():
+    for u in list_all_users(include_admin=True):
         if u["status"] != STATUS_ACTIVE:
             continue
         path = db_path_for(u["username"])
@@ -254,6 +254,31 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
     settings_main = get_settings()  # watchlist compartida (DB por defecto, no ligada a ningun usuario)
     watchlist = list(dict.fromkeys(settings_main["watchlist"] + settings_main["fast_watchlist"]))
 
+    # Pre-filtro por poder de compra (2026-09-14, a pedido del usuario:
+    # "el bot no tiene que analizar los 45") -- union de lo que CADA
+    # cuenta activa podria llegar a pagar, calculado con SOLO el precio
+    # spot (barato, ya cacheado), antes de correr el analisis completo de
+    # 5 estrategias por ticker. Si ninguna cuenta puede pagar un ticker
+    # de entrada, ni vale la pena analizarlo -- ahorra tiempo/llamadas de
+    # red sin cambiar la decision final de que contrato/cantidad comprar
+    # (eso lo sigue haciendo select_affordable_contract() mas abajo, sin
+    # tocar).
+    account_affordable: dict[str, set[str]] = {}
+    union_symbols: set[str] = set()
+    for username, db_path in accounts:
+        acc_settings = get_settings(db_path)
+        acc_status = get_status(db_path=db_path)
+        affordable = estimate_affordable_symbols(
+            watchlist, acc_status["total_account_value"], float(acc_settings["risk_pct_per_trade"]),
+            acc_status["cash_balance"],
+        )
+        account_affordable[username] = set(affordable)
+        union_symbols.update(affordable)
+
+    symbols_to_scan = [s for s in watchlist if s in union_symbols]
+    if len(symbols_to_scan) < len(watchlist):
+        _log(f"Pre-filtro por poder de compra: analizando {len(symbols_to_scan)}/{len(watchlist)} tickers este ciclo.")
+
     def _scan(sym):
         try:
             return sym, scan_all_signals(sym), None
@@ -261,7 +286,7 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
             return sym, None, e
 
     with ThreadPoolExecutor(max_workers=3) as pool:
-        results = list(pool.map(_scan, watchlist))
+        results = list(pool.map(_scan, symbols_to_scan))
 
     signals = []
     for symbol, strategy_results, error in results:
@@ -287,11 +312,14 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
         trades_this_cycle = 0
         used_tickers = set()
 
+        my_affordable = account_affordable.get(username, set())
         for r in signals:
             if trades_this_cycle >= settings["max_trades_per_day"]:
                 break
             if r["confidence"] == "baja" and not ALLOW_LOW_CONFIDENCE:
                 continue
+            if r["symbol"] not in my_affordable:
+                continue  # pre-filtro por poder de compra -- ver estimate_affordable_symbols
             if r["symbol"] in open_tickers or r["symbol"] in used_tickers:
                 continue
             if r["strategy"] == "giro_sma20" and not _giro_sma20_allowed_now():
@@ -312,6 +340,7 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
             risk_pct = float(settings["risk_pct_per_trade"])
             contract, method, quantity = select_affordable_contract(
                 r["symbol"], option_type, spot, status["cash_balance"], status["total_account_value"], risk_pct,
+                sizing_mode=settings.get("sizing_mode", "auto"), fixed_contracts=int(settings["contracts_per_trade"]),
             )
             if contract is None:
                 continue

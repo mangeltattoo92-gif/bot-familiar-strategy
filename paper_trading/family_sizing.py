@@ -63,9 +63,35 @@ def compute_quantity_from_risk(
     return min(by_risk, by_cash)
 
 
+def compute_quantity_fixed(fixed_contracts: int, contract_price: float, available_cash: float,
+                            multiplier: float = 100.0) -> int:
+    """Modo MANUAL (2026-09-14, a pedido del usuario -- alternativa al
+    modo automatico por riesgo de arriba): compra siempre `fixed_contracts`
+    contratos, sin mirar el % de riesgo -- el UNICO limite que se respeta
+    siempre es el cash disponible (nunca se gasta mas de lo que hay)."""
+    if contract_price <= 0 or multiplier <= 0 or fixed_contracts < 1:
+        return 0
+    cost_per_contract = contract_price * multiplier
+    by_cash = int(available_cash // cost_per_contract)
+    return min(fixed_contracts, by_cash)
+
+
+def compute_quantity(
+    sizing_mode: str, account_value: float, risk_pct: float, fixed_contracts: int,
+    contract_price: float, available_cash: float, multiplier: float = 100.0,
+) -> int:
+    """Punto unico de entrada para dimensionar una compra -- elige entre
+    los dos modos segun `sizing_mode` ('auto' | 'manual', ver
+    settings['sizing_mode'])."""
+    if sizing_mode == "manual":
+        return compute_quantity_fixed(fixed_contracts, contract_price, available_cash, multiplier)
+    return compute_quantity_from_risk(account_value, risk_pct, contract_price, available_cash, multiplier)
+
+
 def select_affordable_contract(
     symbol: str, option_type: str, spot_price: float, available_cash: float,
     account_value: float, risk_pct: float, multiplier: float = 100.0,
+    sizing_mode: str = "auto", fixed_contracts: int = 1,
 ) -> tuple[dict | None, str | None, int]:
     """Devuelve (contrato, motivo, cantidad) o (None, None, 0) si nada
     entra en el riesgo/presupuesto de esta cuenta.
@@ -93,7 +119,7 @@ def select_affordable_contract(
         # select_contract exige bid/ask>0 para considerar el candidato),
         # cae al punto medio como ultimo recurso.
         primary_price = primary.get("ask") or primary["price"]
-        qty = compute_quantity_from_risk(account_value, risk_pct, primary_price, available_cash, multiplier)
+        qty = compute_quantity(sizing_mode, account_value, risk_pct, fixed_contracts, primary_price, available_cash, multiplier)
         if qty >= 1:
             return primary, "primario (mayor volumen en rango de delta 0.40-0.60)", qty
 
@@ -128,7 +154,7 @@ def select_affordable_contract(
         price = _option_row_price(row)
         if price is None:
             continue
-        qty = compute_quantity_from_risk(account_value, risk_pct, ask, available_cash, multiplier)
+        qty = compute_quantity(sizing_mode, account_value, risk_pct, fixed_contracts, ask, available_cash, multiplier)
         if qty < 1:
             continue  # ni 1 solo contrato entra en el riesgo/cash de esta cuenta
         iv = float(row.get("impliedVolatility") or 0)
@@ -168,3 +194,49 @@ def select_affordable_contract(
         "volume": int(best_row.get("volume") or 0),
     }
     return contract, "fallback por presupuesto (el mas barato que entra en el riesgo/cash disponible, no el de mayor volumen)", best_qty
+
+
+# Heuristica de PRE-filtro (2026-09-14, a pedido del usuario: "el bot no
+# tiene que analizar los 45" -- reducir cuanto se analiza por cuenta segun
+# su poder de compra). Una opcion ATM/cerca del dinero, a ~1-2 semanas de
+# vencimiento, suele costar entre ~2% y ~6% del precio del subyacente
+# (varia con volatilidad implicita, no es exacto). Se usa el extremo BAJO
+# (2%) a proposito: es mejor un falso positivo (se analiza una tickers que
+# despues igual no entra en select_affordable_contract) que un falso
+# negativo (se descarta de entrada una señal real que si hubiera sido
+# alcanzable). Esto NO reemplaza select_affordable_contract() -- esa sigue
+# siendo la decision final real sobre que contrato y cuantos comprar; esto
+# solo decide QUE TICKERS vale la pena analizar en detalle (5 estrategias
+# x historial de precios) en primer lugar, para no gastar tiempo/llamadas
+# de red en tickers que ninguna cuenta podria pagar de todos modos.
+ESTIMATED_ATM_PREMIUM_PCT = 0.02
+
+
+def estimate_affordable_symbols(
+    symbols: list[str], account_value: float, risk_pct: float, available_cash: float,
+    multiplier: float = 100.0,
+) -> list[str]:
+    """Filtra `symbols` a los que probablemente tengan al menos un contrato
+    ATM que entre en el riesgo/cash de esta cuenta, usando SOLO el precio
+    spot actual (ya cacheado por market_data, sin llamadas nuevas por
+    ticker) -- mucho mas barato que correr las 5 estrategias completas
+    sobre un ticker que de entrada no tiene chance de ser comprable."""
+    from webapp import market_data
+
+    budget = min(account_value * (risk_pct / 100.0), available_cash)
+    if budget <= 0:
+        return []
+
+    overview = market_data.get_watchlist_overview(symbols)
+    prices = {row["symbol"]: row["last_close"] for row in overview}
+
+    affordable = []
+    for symbol in symbols:
+        spot = prices.get(symbol)
+        if spot is None or spot <= 0:
+            affordable.append(symbol)  # sin dato confiable -- no se descarta a ciegas
+            continue
+        estimated_cost = spot * ESTIMATED_ATM_PREMIUM_PCT * multiplier
+        if estimated_cost <= budget:
+            affordable.append(symbol)
+    return affordable
