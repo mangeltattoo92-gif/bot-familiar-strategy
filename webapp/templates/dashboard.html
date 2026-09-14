@@ -11,7 +11,7 @@
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
   <meta name="theme-color" content="#0b0d12">
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/icon-192.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ asset_url('css/style.css') }}">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -64,20 +64,20 @@
 
   <main>
    <div id="main-view">
-    <section class="cards" id="resumen">
-      <div class="card card-hero">
-        <div class="card-label">Valor total de la cuenta</div>
-        <div class="card-value" id="total-value">—</div>
-        <div class="card-sub" id="total-pnl-pct">—</div>
+    <section class="stat-strip" id="resumen">
+      <div class="stat">
+        <div class="stat-label">Valor total de la cuenta</div>
+        <div class="stat-value" id="total-value">—</div>
+        <div class="stat-sub" id="total-pnl-pct">—</div>
       </div>
-      <div class="card">
-        <div class="card-label">Balance virtual (cash)</div>
-        <div class="card-value" id="cash-balance">—</div>
+      <div class="stat">
+        <div class="stat-label">Balance virtual (cash)</div>
+        <div class="stat-value" id="cash-balance">—</div>
       </div>
-      <div class="card">
-        <div class="card-label">P&amp;L total</div>
-        <div class="card-value" id="total-pnl">—</div>
-        <div class="card-sub muted" id="pnl-breakdown">—</div>
+      <div class="stat">
+        <div class="stat-label">P&amp;L total</div>
+        <div class="stat-value" id="total-pnl">—</div>
+        <div class="stat-sub" id="pnl-breakdown">—</div>
       </div>
     </section>
 
@@ -96,20 +96,20 @@
       <div class="panel-head">
         <h2>Rendimiento de operaciones</h2>
       </div>
-      <div class="cards" id="weekly-summary-cards">
-        <div class="card">
-          <div class="card-label">Operaciones esta semana</div>
-          <div class="card-value" id="week-trades">—</div>
-          <div class="card-sub muted" id="week-trades-sub">—</div>
+      <div class="stat-strip" id="weekly-summary-cards">
+        <div class="stat">
+          <div class="stat-label">Operaciones esta semana</div>
+          <div class="stat-value" id="week-trades">—</div>
+          <div class="stat-sub" id="week-trades-sub">—</div>
         </div>
-        <div class="card">
-          <div class="card-label">Ganadas / Perdidas</div>
-          <div class="card-value" id="week-win-loss">—</div>
-          <div class="card-sub muted" id="week-win-rate">—</div>
+        <div class="stat">
+          <div class="stat-label">Ganadas / Perdidas</div>
+          <div class="stat-value" id="week-win-loss">—</div>
+          <div class="stat-sub" id="week-win-rate">—</div>
         </div>
-        <div class="card">
-          <div class="card-label">P&amp;L de la semana</div>
-          <div class="card-value" id="week-pnl">—</div>
+        <div class="stat">
+          <div class="stat-label">P&amp;L de la semana</div>
+          <div class="stat-value" id="week-pnl">—</div>
         </div>
       </div>
     </section>
@@ -136,6 +136,15 @@
           <tbody></tbody>
         </table>
         <p class="muted empty-msg" id="positions-empty" hidden>Sin posiciones abiertas ni cerradas hoy todavía.</p>
+      </div>
+      <div class="closed-today-mobile" id="closed-today-mobile" hidden>
+        <button class="closed-today-header collapsed" id="closed-today-toggle" aria-label="Expandir cerradas hoy" aria-expanded="false">
+          <span>Cerradas hoy <span class="muted" id="closed-today-count">(0)</span></span>
+          <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6.7 8.3a1 1 0 0 1 1.4 0L12 12.17l3.9-3.87a1 1 0 1 1 1.4 1.42l-4.6 4.56a1 1 0 0 1-1.4 0L6.7 9.72a1 1 0 0 1 0-1.42Z"/></svg>
+        </button>
+        <div class="collapsible collapsed" id="closed-today-box">
+          <div id="closed-today-list"></div>
+        </div>
       </div>
     </section>
 
@@ -195,6 +204,22 @@
             <tbody></tbody>
           </table>
         </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-affordable" hidden>
+      <div class="panel-head">
+        <h2>Accesibles con tu capital <span class="muted" id="affordable-count">(0)</span></h2>
+        <div class="panel-head-right">
+          <span class="muted small" id="affordable-updated">—</span>
+          <button class="panel-toggle collapsed" id="affordable-toggle" title="Expandir" aria-label="Expandir panel" aria-expanded="false">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6.7 8.3a1 1 0 0 1 1.4 0L12 12.17l3.9-3.87a1 1 0 1 1 1.4 1.42l-4.6 4.56a1 1 0 0 1-1.4 0L6.7 9.72a1 1 0 0 1 0-1.42Z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="collapsible collapsed" id="affordable-box">
+        <p class="muted small" id="affordable-budget">—</p>
+        <div class="chip-grid" id="affordable-chips"></div>
       </div>
     </section>
 
@@ -377,18 +402,9 @@
         <button class="modal-close" id="settings-close" aria-label="Cerrar">&times;</button>
       </div>
       <div class="modal-body">
-        <div class="risk-slider-head">
-          <label for="setting-risk-pct" style="margin-top:0;">Riesgo por operación (% de tu cuenta)</label>
-          <span class="risk-level-tag" id="risk-level-tag">—</span>
-        </div>
-        <div class="risk-slider-value" id="risk-pct-display">2.0%</div>
-        <input type="range" class="risk-slider" id="setting-risk-pct" min="0.5" max="10" step="0.5" value="2">
-        <div class="risk-slider-scale"><span>0.5%</span><span>Recomendado 2%</span><span>10%</span></div>
-        <div class="risk-amount-line">
-          <span>Monto en riesgo por operación</span>
-          <strong id="risk-amount-display">—</strong>
-        </div>
-        <p class="muted small">La cantidad de contratos se calcula sola: nunca se arriesga más de este % del valor total de tu cuenta en una sola operación (además del límite de cash disponible).</p>
+        <label for="setting-fixed-contracts" style="margin-top:0;">Cantidad fija de contratos por operación</label>
+        <input type="number" id="setting-fixed-contracts" min="1" step="1" value="1">
+        <p class="muted small">Siempre compra esta cantidad exacta, en cada operación, hasta que vos la cambies. El único límite que se respeta es el cash disponible (nunca se gasta más de lo que hay).</p>
 
         <label for="setting-max-trades">Operaciones máximas por día</label>
         <input type="number" id="setting-max-trades" min="1" step="1" value="3">
@@ -403,9 +419,37 @@
         <div class="settings-counter" id="settings-counter">Operaciones hoy: — / —</div>
         <p class="muted small">Las ventas de cierre no cuentan para el límite — una vez abierta una posición, siempre se puede cerrar.</p>
         <p class="settings-error" id="settings-error" hidden></p>
+
+        {% if not session.get('is_admin') %}
+        <div class="danger-zone">
+          <p class="danger-zone-title">Zona de peligro</p>
+          <p class="muted small">Podés dejar de usar la app en cualquier momento. Tu historial y balance quedan guardados — si querés volver más adelante, pedile al administrador que reactive tu cuenta.</p>
+          <button class="btn-danger" id="leave-app-btn" type="button">Abandonar la app</button>
+        </div>
+        {% endif %}
       </div>
       <div class="modal-actions">
+        <button class="btn-secondary" id="settings-refresh" type="button" style="background:transparent; color:var(--text); border:1px solid var(--border);">Actualizar</button>
         <button class="btn-secondary" id="settings-save">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="leave-app-modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Abandonar la app</h3>
+        <button class="modal-close" id="leave-app-close" aria-label="Cerrar">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p>Esta acción bloquea tu acceso de inmediato. Tu balance, posiciones e historial NO se borran — quedan guardados por si volvés. Para confirmar, ingresá tu contraseña.</p>
+        <label for="leave-app-password">Contraseña</label>
+        <input type="password" id="leave-app-password" class="text-input" style="width:100%;" autocomplete="current-password">
+        <p class="settings-error" id="leave-app-error" hidden></p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="leave-app-cancel" type="button">Cancelar</button>
+        <button class="btn-danger" id="leave-app-confirm" type="button">Confirmar y abandonar</button>
       </div>
     </div>
   </div>
@@ -447,6 +491,6 @@
     </div>
   </div>
 
-  <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+  <script src="{{ asset_url('js/dashboard.js') }}"></script>
 </body>
 </html>

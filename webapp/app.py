@@ -41,6 +41,7 @@ from paper_trading.engine import (  # noqa: E402
     record_trade,
     update_settings,
 )
+from paper_trading.family_sizing import estimate_affordable_symbols  # noqa: E402
 from paper_trading import nyse_calendar  # noqa: E402
 from paper_trading.trade_journal import daily_breakdown, get_closed_trades, get_todays_closed_trades, weekly_summary  # noqa: E402
 from webapp import market_data  # noqa: E402
@@ -48,6 +49,7 @@ from webapp.email_sender import send_activation_email  # noqa: E402
 from webapp.auth import (  # noqa: E402
     STATUS_ACTIVE,
     STATUS_CODE_SENT,
+    STATUS_LEFT,
     STATUS_PENDING,
     STATUS_REJECTED,
     disconnect_user,
@@ -55,6 +57,7 @@ from webapp.auth import (  # noqa: E402
     get_user,
     get_user_by_id,
     has_any_user,
+    leave_app,
     list_all_users,
     list_pending_users,
     needs_terms_acceptance,
@@ -161,6 +164,24 @@ app.config.update(
 )
 
 
+@app.template_global()
+def asset_url(filename: str) -> str:
+    """url_for('static', ...) + `?v=<mtime>` -- cache-buster real (2026-09-14,
+    a pedido del usuario: cambios de UI que no se veian reflejados en el
+    navegador aunque el servidor ya tenia el archivo nuevo, confirmado NO
+    era un bug del backend -- el navegador/PWA se quedaba con la version
+    vieja en cache pese al header Cache-Control: no-cache). Cada deploy
+    cambia el mtime del archivo -> cambia la URL -> el navegador esta
+    OBLIGADO a pedir el archivo nuevo, sin depender de que el usuario haga
+    un refresh forzado."""
+    path = Path(app.static_folder) / filename
+    try:
+        version = int(path.stat().st_mtime)
+    except OSError:
+        version = 0
+    return f"{url_for('static', filename=filename)}?v={version}"
+
+
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -218,6 +239,8 @@ def login():
             return redirect(url_for("activate"))
         elif user["status"] == STATUS_REJECTED:
             error = "Tu cuenta no tiene acceso. Consulta con el administrador."
+        elif user["status"] == STATUS_LEFT:
+            error = "Elegiste abandonar la app. Si querés volver, consultá con el administrador para reactivar tu cuenta."
         else:
             session.clear()
             session["user"] = username
@@ -314,6 +337,28 @@ def activate():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+@app.route("/api/leave-app", methods=["POST"])
+@login_required
+def api_leave_app():
+    """Accion del propio usuario (no del admin) para abandonar la app --
+    parametro de confirmacion: reingresar su propia contrasena, igual que
+    cualquier accion destructiva de cuenta (patron estandar, evita un
+    click accidental o de otra persona con la sesion abierta). No borra
+    balance/posiciones/historial -- solo bloquea el login (ver leave_app
+    en webapp/auth.py). La cuenta admin no puede usar esto -- no tiene
+    sentido "abandonar" la cuenta principal desde aca."""
+    if session.get("is_admin"):
+        return jsonify({"error": "La cuenta administradora no puede abandonarse desde aca."}), 400
+    password = (request.get_json(silent=True) or {}).get("password", "")
+    username = session["user"]
+    if not password or not verify_password(username, password):
+        return jsonify({"error": "Contraseña incorrecta."}), 400
+    user = get_user(username)
+    leave_app(user["id"])
+    session.clear()
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------
@@ -794,6 +839,35 @@ def api_fast_watchlist():
     return jsonify(market_data.get_watchlist_overview(settings["fast_watchlist"]))
 
 
+@app.route("/api/affordable-symbols")
+@login_required
+def api_affordable_symbols():
+    # 2026-09-14, a pedido del usuario: mostrarle a cada cuenta CUALES
+    # tickers de su watchlist son accesibles con su poder de compra
+    # actual -- reusa el mismo pre-filtro que ya usa el motor de
+    # entradas real (paper_trading.family_sizing.estimate_affordable_symbols)
+    # para que lo que ve en pantalla sea EXACTAMENTE lo que el motor usa
+    # para decidir que analizar, no una aproximacion aparte.
+    db_path = _user_db_path()
+    settings = get_settings(db_path=db_path)
+    status = get_status(db_path=db_path)
+    all_symbols = list(dict.fromkeys(settings["watchlist"] + settings["fast_watchlist"]))
+    affordable = estimate_affordable_symbols(
+        all_symbols, status["total_account_value"], float(settings["risk_pct_per_trade"]),
+        status["cash_balance"],
+        sizing_mode=settings.get("sizing_mode", "auto"), fixed_contracts=int(settings["contracts_per_trade"]),
+    )
+    if settings.get("sizing_mode") == "manual":
+        budget = status["cash_balance"] / max(int(settings["contracts_per_trade"]), 1)
+    else:
+        budget = min(status["total_account_value"] * settings["risk_pct_per_trade"] / 100, status["cash_balance"])
+    return jsonify({
+        "affordable": affordable,
+        "total": len(all_symbols),
+        "budget": round(budget, 2),
+    })
+
+
 @app.route("/api/bot-status", methods=["GET", "POST"])
 @login_required
 def api_bot_status():
@@ -841,12 +915,20 @@ def api_settings():
                 risk_pct_per_trade = float(risk_pct_per_trade)
             except (TypeError, ValueError):
                 return jsonify({"error": "risk_pct_per_trade debe ser un numero."}), 400
+        sizing_mode = data.get("sizing_mode")
+        contracts_per_trade = data.get("contracts_per_trade")
+        if contracts_per_trade is not None:
+            try:
+                contracts_per_trade = int(contracts_per_trade)
+            except (TypeError, ValueError):
+                return jsonify({"error": "contracts_per_trade debe ser un numero entero."}), 400
         try:
             settings = update_settings(
                 max_trades_per_day=max_trades,
                 watchlist=watchlist, fast_watchlist=fast_watchlist,
                 max_daily_loss_pct=max_daily_loss_pct,
                 risk_pct_per_trade=risk_pct_per_trade,
+                sizing_mode=sizing_mode, contracts_per_trade=contracts_per_trade,
                 db_path=db_path,
             )
         except PaperTradingError as e:

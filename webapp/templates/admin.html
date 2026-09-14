@@ -11,7 +11,7 @@
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
   <meta name="theme-color" content="#0b0d12">
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/icon-192.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ asset_url('css/style.css') }}">
   <style>
     .admin-badge { display:inline-flex; align-items:center; gap:0.4rem; padding:0.3rem 0.7rem; border-radius:999px; background:var(--accent-soft, rgba(91,110,248,.14)); color:var(--accent); font-size:0.72rem; font-weight:800; letter-spacing:0.04em; text-transform:uppercase; }
     .proc-badge { display:inline-flex; align-items:center; gap:6px; font-size:0.78rem; font-weight:600; color: var(--muted); }
@@ -142,6 +142,8 @@
                   <span class="status-pill on"><span class="dot"></span>Conectado</span>
                 {% elif u.status == 'code_sent' %}
                   <span class="status-pill premarket"><span class="dot"></span>Código enviado</span>
+                {% elif u.status == 'left' %}
+                  <span class="status-pill off"><span class="dot"></span>Abandonó la app</span>
                 {% else %}
                   <span class="status-pill off"><span class="dot"></span>Desconectado</span>
                 {% endif %}

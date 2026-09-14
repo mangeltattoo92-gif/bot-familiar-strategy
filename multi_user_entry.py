@@ -271,6 +271,7 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
         affordable = estimate_affordable_symbols(
             watchlist, acc_status["total_account_value"], float(acc_settings["risk_pct_per_trade"]),
             acc_status["cash_balance"],
+            sizing_mode=acc_settings.get("sizing_mode", "auto"), fixed_contracts=int(acc_settings["contracts_per_trade"]),
         )
         account_affordable[username] = set(affordable)
         union_symbols.update(affordable)

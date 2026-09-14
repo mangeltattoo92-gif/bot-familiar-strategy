@@ -41,6 +41,7 @@ STATUS_PENDING = "pending"        # se registro, esperando que el admin lo aprue
 STATUS_CODE_SENT = "code_sent"    # admin aprobo, codigo generado, esperando que lo ingrese
 STATUS_ACTIVE = "active"          # activado, acceso completo
 STATUS_REJECTED = "rejected"      # admin lo rechazo
+STATUS_LEFT = "left"              # el propio usuario eligio abandonar la app (ver leave_app)
 
 ACTIVATION_CODE_TTL_HOURS = 48
 
@@ -269,12 +270,23 @@ def list_pending_users(db_path: Path = DEFAULT_USERS_DB) -> list[dict]:
         conn.close()
 
 
-def list_all_users(db_path: Path = DEFAULT_USERS_DB) -> list[dict]:
+def list_all_users(db_path: Path = DEFAULT_USERS_DB, include_admin: bool = False) -> list[dict]:
     """Para el panel de admin -- NUNCA incluir balance/P&L/posiciones aca,
-    eso vive en la base de datos de trading de cada usuario, separada."""
+    eso vive en la base de datos de trading de cada usuario, separada.
+
+    include_admin=False (default) excluye la cuenta admin -- correcto para
+    el panel ("no mostrarte a vos mismo en tu propia lista de familiares").
+    Bug real encontrado 2026-09-14: multi_user_entry.py y health_check.py
+    reusaban esta funcion tal cual para decidir a quien ESCANEAR/CHEQUEAR
+    para operar -- heredaban sin querer la exclusion del admin, asi que la
+    cuenta admin (activa) nunca se operaba ni se chequeaba pase lo que
+    pase. Esos dos usos deben pasar include_admin=True."""
     conn = _connect(db_path)
     try:
-        rows = conn.execute("SELECT * FROM users WHERE is_admin = 0 ORDER BY created_at DESC").fetchall()
+        if include_admin:
+            rows = conn.execute("SELECT * FROM users ORDER BY created_at DESC").fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM users WHERE is_admin = 0 ORDER BY created_at DESC").fetchall()
         return [_row_to_dict(r) for r in rows]
     finally:
         conn.close()
@@ -284,6 +296,22 @@ def reject_user(user_id: int, db_path: Path = DEFAULT_USERS_DB) -> None:
     conn = _connect(db_path)
     try:
         conn.execute("UPDATE users SET status = ? WHERE id = ?", (STATUS_REJECTED, user_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def leave_app(user_id: int, db_path: Path = DEFAULT_USERS_DB) -> None:
+    """El propio usuario elige abandonar la app (a diferencia de
+    disconnect_user/reject_user, que son acciones del ADMIN sobre otra
+    cuenta). Estado separado ('left', no 'rejected') para que el panel de
+    admin pueda distinguir "se fue por su cuenta" de "lo desconecto el
+    admin" -- no borra nada (balance/posiciones/historial quedan intactos
+    por si vuelve), solo bloquea el login. El admin puede reactivarla con
+    el mismo boton de reconectar que ya existe para cuentas rechazadas."""
+    conn = _connect(db_path)
+    try:
+        conn.execute("UPDATE users SET status = ? WHERE id = ?", (STATUS_LEFT, user_id))
         conn.commit()
     finally:
         conn.close()

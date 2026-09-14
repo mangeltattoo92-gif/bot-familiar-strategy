@@ -194,6 +194,65 @@ fastWatchlistToggle.addEventListener("click", () => {
   setFastWatchlistPanelCollapsed(!fastWatchlistBox.classList.contains("collapsed"));
 });
 
+/* ---------- Collapsible affordable-symbols panel (2026-09-14, a pedido
+   del usuario: mostrar que tickers puede pagar esta cuenta con su
+   capital actual -- Y que el panel entero aparezca/desaparezca solo:
+   si el capital ya alcanza para TODOS los tickers, este panel no
+   aporta nada y se oculta; si despues hay perdidas y el poder de
+   compra baja de nuevo, reaparece solo con lo que si entra. Por eso
+   NO es "carga perezosa solo al expandir" como los otros paneles
+   colapsables -- necesita chequearse periodicamente aunque este
+   colapsado, para saber si debe mostrarse o no). ---------- */
+const AFFORDABLE_COLLAPSED_KEY = "mapi-affordable-panel-collapsed";
+const affordablePanel = document.getElementById("panel-affordable");
+const affordableBox = document.getElementById("affordable-box");
+const affordableToggle = document.getElementById("affordable-toggle");
+
+async function refreshAffordable() {
+  const data = await fetchJSON("/api/affordable-symbols");
+  if (!data) return;
+  if (data.affordable.length >= data.total) {
+    // El capital ya alcanza para todo el watchlist -- este panel no
+    // restringe nada, no tiene sentido mostrarlo.
+    affordablePanel.hidden = true;
+    return;
+  }
+  affordablePanel.hidden = false;
+  document.getElementById("affordable-count").textContent = `(${data.affordable.length}/${data.total})`;
+  document.getElementById("affordable-budget").textContent =
+    `Presupuesto estimado por operacion: ${fmtUsd(data.budget)}. Estos son los tickers donde ese presupuesto probablemente alcanza para al menos 1 contrato cerca del dinero.`;
+  const chipsEl = document.getElementById("affordable-chips");
+  chipsEl.innerHTML = "";
+  if (data.affordable.length === 0) {
+    chipsEl.innerHTML = '<span class="muted small">Ningun ticker entra con el capital actual de esta cuenta.</span>';
+  } else {
+    for (const sym of data.affordable) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = sym;
+      chipsEl.appendChild(chip);
+    }
+  }
+  setLastUpdated("affordable-updated", new Date().toISOString());
+}
+
+function setAffordableCollapsed(collapsed) {
+  affordableBox.classList.toggle("collapsed", collapsed);
+  affordableToggle.classList.toggle("collapsed", collapsed);
+  affordableToggle.setAttribute("aria-expanded", String(!collapsed));
+  affordableToggle.title = collapsed ? "Expandir" : "Minimizar";
+  localStorage.setItem(AFFORDABLE_COLLAPSED_KEY, collapsed ? "1" : "0");
+}
+
+setAffordableCollapsed(localStorage.getItem(AFFORDABLE_COLLAPSED_KEY) !== "0");
+affordablePanel.hidden = true; // hasta que el primer refreshAffordable() decida si corresponde mostrarlo
+refreshAffordable();
+setInterval(refreshAffordable, 30000);
+
+affordableToggle.addEventListener("click", () => {
+  setAffordableCollapsed(!affordableBox.classList.contains("collapsed"));
+});
+
 /* ---------- Collapsible mercado panel ---------- */
 const MERCADO_COLLAPSED_KEY = "mapi-mercado-panel-collapsed";
 const mercadoBox = document.getElementById("mercado-box");
@@ -351,54 +410,103 @@ const settingsBtn = document.getElementById("settings-btn");
 const settingsModal = document.getElementById("settings-modal");
 const settingsClose = document.getElementById("settings-close");
 const settingsSave = document.getElementById("settings-save");
-const settingsRiskPctInput = document.getElementById("setting-risk-pct");
-const riskPctDisplay = document.getElementById("risk-pct-display");
-const riskLevelTag = document.getElementById("risk-level-tag");
-const riskAmountDisplay = document.getElementById("risk-amount-display");
 const settingsMaxTradesInput = document.getElementById("setting-max-trades");
 const settingsWatchlistInput = document.getElementById("setting-watchlist");
 const settingsMaxDailyLossInput = document.getElementById("setting-max-daily-loss");
 const settingsCounter = document.getElementById("settings-counter");
 const settingsError = document.getElementById("settings-error");
-
-function riskLevelFor(pct) {
-  if (pct <= 2) return { label: "Conservador", cls: "conservador" };
-  if (pct <= 4.5) return { label: "Moderado", cls: "moderado" };
-  if (pct <= 7.5) return { label: "Agresivo", cls: "agresivo" };
-  return { label: "Muy agresivo", cls: "muy-agresivo" };
-}
-
-function updateRiskSliderDisplay() {
-  const pct = parseFloat(settingsRiskPctInput.value);
-  const fillPct = ((pct - 0.5) / (10 - 0.5)) * 100;
-  settingsRiskPctInput.style.setProperty("--fill", `${fillPct}%`);
-  riskPctDisplay.textContent = `${pct.toFixed(1)}%`;
-  const level = riskLevelFor(pct);
-  riskLevelTag.textContent = level.label;
-  riskLevelTag.className = `risk-level-tag ${level.cls}`;
-  riskAmountDisplay.textContent = fmtUsd(lastAccountValue * pct / 100);
-}
-settingsRiskPctInput.addEventListener("input", updateRiskSliderDisplay);
+const settingsFixedContractsInput = document.getElementById("setting-fixed-contracts");
 
 function renderSettings(data) {
-  settingsRiskPctInput.value = data.risk_pct_per_trade;
   settingsMaxTradesInput.value = data.max_trades_per_day;
   settingsWatchlistInput.value = (data.watchlist || []).join(",");
   settingsMaxDailyLossInput.value = data.max_daily_loss_pct;
+  settingsFixedContractsInput.value = data.contracts_per_trade || 1;
   settingsCounter.textContent = `Operaciones hoy: ${data.trades_today} / ${data.max_trades_per_day}`;
-  updateRiskSliderDisplay();
 }
 
 async function openSettingsModal() {
   settingsError.hidden = true;
-  const data = await fetchJSON("/api/settings");
-  if (data) renderSettings(data);
+  settingsSave.disabled = true;
   settingsModal.hidden = false;
+  // Bug real encontrado 2026-09-14: si esta carga fallaba (red, sesion),
+  // el modal se quedaba con los valores de PLACEHOLDER del HTML crudo
+  // (3, 8, 2%) sin avisar -- si el usuario apretaba Guardar en ese
+  // estado, esos placeholders se guardaban de verdad, pisando su
+  // configuracion real sin que el usuario cambiara nada a proposito.
+  // Ahora: Guardar queda DESHABILITADO hasta confirmar que los valores
+  // reales del servidor cargaron bien.
+  let data = null;
+  try {
+    data = await fetchJSON("/api/settings");
+  } catch (e) {
+    data = null;
+  }
+  if (data) {
+    renderSettings(data);
+    settingsSave.disabled = false;
+  } else {
+    settingsError.textContent = "No se pudo cargar tu configuracion actual -- no se puede guardar hasta que esto funcione. Cerra y volve a intentar.";
+    settingsError.hidden = false;
+  }
 }
 
 function closeSettingsModal() {
   settingsModal.hidden = true;
 }
+
+/* ---------- Abandonar la app (solo cuentas no-admin, ver .danger-zone) --------- */
+const leaveAppBtn = document.getElementById("leave-app-btn");
+const leaveAppModal = document.getElementById("leave-app-modal");
+const leaveAppClose = document.getElementById("leave-app-close");
+const leaveAppCancel = document.getElementById("leave-app-cancel");
+const leaveAppConfirm = document.getElementById("leave-app-confirm");
+const leaveAppPassword = document.getElementById("leave-app-password");
+const leaveAppError = document.getElementById("leave-app-error");
+
+function openLeaveAppModal() {
+  closeSettingsModal();
+  leaveAppError.hidden = true;
+  leaveAppPassword.value = "";
+  leaveAppModal.hidden = false;
+}
+function closeLeaveAppModal() {
+  leaveAppModal.hidden = true;
+}
+if (leaveAppBtn) leaveAppBtn.addEventListener("click", openLeaveAppModal);
+if (leaveAppClose) leaveAppClose.addEventListener("click", closeLeaveAppModal);
+if (leaveAppCancel) leaveAppCancel.addEventListener("click", closeLeaveAppModal);
+if (leaveAppConfirm) leaveAppConfirm.addEventListener("click", async () => {
+  const password = leaveAppPassword.value;
+  if (!password) {
+    leaveAppError.textContent = "Ingresá tu contraseña para confirmar.";
+    leaveAppError.hidden = false;
+    return;
+  }
+  leaveAppConfirm.disabled = true;
+  leaveAppConfirm.textContent = "Confirmando…";
+  try {
+    const res = await fetch("/api/leave-app", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      leaveAppError.textContent = data.error || "No se pudo procesar la solicitud.";
+      leaveAppError.hidden = false;
+      leaveAppConfirm.disabled = false;
+      leaveAppConfirm.textContent = "Confirmar y abandonar";
+      return;
+    }
+    window.location.href = "/login";
+  } catch (e) {
+    leaveAppError.textContent = "Error de red al intentar procesar la solicitud.";
+    leaveAppError.hidden = false;
+    leaveAppConfirm.disabled = false;
+    leaveAppConfirm.textContent = "Confirmar y abandonar";
+  }
+});
 
 /* ---------- Dinero real (banner + modal informativo, sin funcionalidad
    real todavia) ---------- */
@@ -441,17 +549,24 @@ if (robinhoodUnmarkBtn) robinhoodUnmarkBtn.addEventListener("click", () => setRo
 
 settingsBtn.addEventListener("click", openSettingsModal);
 settingsClose.addEventListener("click", closeSettingsModal);
+document.getElementById("settings-refresh").addEventListener("click", async () => {
+  settingsError.hidden = true;
+  settingsSave.disabled = true;
+  const data = await fetchJSON("/api/settings");
+  if (data) {
+    renderSettings(data);
+    settingsSave.disabled = false;
+  } else {
+    settingsError.textContent = "No se pudo actualizar -- reintenta.";
+    settingsError.hidden = false;
+  }
+});
 settingsSave.addEventListener("click", async () => {
   settingsError.hidden = true;
-  const riskPct = parseFloat(settingsRiskPctInput.value);
   const maxTrades = parseInt(settingsMaxTradesInput.value, 10);
   const watchlist = settingsWatchlistInput.value.trim();
   const maxDailyLoss = parseFloat(settingsMaxDailyLossInput.value);
-  if (!Number.isFinite(riskPct) || riskPct < 0.5 || riskPct > 10) {
-    settingsError.textContent = "El riesgo por operacion debe estar entre 0.5% y 10%.";
-    settingsError.hidden = false;
-    return;
-  }
+  const fixedContracts = parseInt(settingsFixedContractsInput.value, 10);
   if (!Number.isInteger(maxTrades) || maxTrades < 1) {
     settingsError.textContent = "Las operaciones maximas por dia deben ser un numero entero de al menos 1.";
     settingsError.hidden = false;
@@ -467,13 +582,19 @@ settingsSave.addEventListener("click", async () => {
     settingsError.hidden = false;
     return;
   }
+  if (!Number.isInteger(fixedContracts) || fixedContracts < 1) {
+    settingsError.textContent = "La cantidad fija de contratos debe ser un numero entero de al menos 1.";
+    settingsError.hidden = false;
+    return;
+  }
   try {
     const res = await fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        risk_pct_per_trade: riskPct, max_trades_per_day: maxTrades, watchlist,
-        max_daily_loss_pct: maxDailyLoss,
+        max_trades_per_day: maxTrades, watchlist,
+        max_daily_loss_pct: maxDailyLoss, sizing_mode: "manual",
+        contracts_per_trade: fixedContracts,
       }),
     });
     const data = await res.json();
@@ -512,12 +633,22 @@ function refreshChartThemes() {
 
 /* ---------- Data fetch ---------- */
 async function fetchJSON(url) {
-  const res = await fetch(url);
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    return null; // error de red -- el llamador decide como avisar, nunca placeholders silenciosos
+  }
   if (res.status === 401 || res.redirected) {
     window.location.href = "/login";
     return null;
   }
-  return res.json();
+  if (!res.ok) return null;
+  try {
+    return await res.json();
+  } catch (e) {
+    return null; // respuesta no era JSON valido (ej. pagina de error 500)
+  }
 }
 
 function setLastUpdated(elId, isoString) {
@@ -591,7 +722,41 @@ function renderStatus(status) {
     tbody.appendChild(tr);
   }
 
+  renderClosedTodayMobile(closedToday);
   setLastUpdated("last-updated", status.updated_at);
+}
+
+/* ---------- Lista compacta de cerradas hoy, SOLO celular (2026-09-14,
+   a pedido del usuario: "SPY $770 ganancia/perdida $12.00 (+6.90%)"
+   en vez de la fila completa de la tabla -- ver .closed-today-mobile
+   en el CSS, oculto por defecto salvo en pantallas chicas). ---------- */
+const closedTodayWrap = document.getElementById("closed-today-mobile");
+const closedTodayToggle = document.getElementById("closed-today-toggle");
+const closedTodayBox = document.getElementById("closed-today-box");
+closedTodayToggle.addEventListener("click", () => {
+  const collapsed = !closedTodayBox.classList.contains("collapsed");
+  closedTodayBox.classList.toggle("collapsed", collapsed);
+  closedTodayToggle.classList.toggle("collapsed", collapsed);
+  closedTodayToggle.setAttribute("aria-expanded", String(!collapsed));
+});
+
+function renderClosedTodayMobile(closedToday) {
+  closedTodayWrap.hidden = closedToday.length === 0;
+  if (closedToday.length === 0) return;
+  document.getElementById("closed-today-count").textContent = `(${closedToday.length})`;
+  const listEl = document.getElementById("closed-today-list");
+  listEl.innerHTML = "";
+  for (const t of closedToday) {
+    const isOption = t.asset_type === "option";
+    const label = isOption ? `${t.ticker} $${t.option_details.strike}` : t.ticker;
+    const row = document.createElement("div");
+    row.className = "closed-today-row";
+    row.innerHTML = `
+      <span class="ticker">${label}</span>
+      <span class="pnl ${pnlClass(t.pnl)}">${arrow(t.pnl)} ${fmtUsd(Math.abs(t.pnl))} (${fmtPct(t.pnl_pct)})</span>
+    `;
+    listEl.appendChild(row);
+  }
 }
 
 function _fmtDateTime(iso) {

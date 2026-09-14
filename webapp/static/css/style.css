@@ -447,6 +447,103 @@ main {
 }
 .card-sub { font-size: 0.83rem; color: var(--muted); margin-top: 0.35rem; font-weight: 500; }
 
+/* Franja compacta de estadisticas en una sola linea (2026-09-14, a
+   pedido del usuario -- las tarjetas grandes de "Rendimiento de
+   operaciones" ocupaban demasiado espacio). Mismo panel/borde/sombra
+   que .card pero con divisores internos en vez de tarjetas separadas --
+   mas denso, mas "dashboard profesional" que "tarjeta grande". */
+.stat-strip {
+  display: flex;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  overflow-x: auto;
+}
+.stat-strip .stat {
+  flex: 1 1 0;
+  min-width: 130px;
+  padding: 0.7rem 1.1rem;
+  border-right: 1px solid var(--border);
+}
+.stat-strip .stat:last-child { border-right: none; }
+.stat-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  font-weight: 700;
+}
+.stat-value {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-top: 0.25rem;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.stat-sub { font-size: 0.7rem; color: var(--muted); margin-top: 0.15rem; font-weight: 500; }
+@media (max-width: 480px) {
+  .stat-strip .stat { min-width: 108px; padding: 0.6rem 0.8rem; }
+  .stat-value { font-size: 1rem; }
+}
+
+/* Cerradas hoy en lista compacta plegable, SOLO en celular (2026-09-14,
+   a pedido del usuario) -- en desktop las filas cerradas siguen
+   mezcladas en la tabla principal con la insignia "Cerrada", sin tocar
+   ese comportamiento. */
+.closed-today-mobile { display: none; }
+.closed-today-header {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.closed-today-header svg { transition: transform 0.15s ease; flex-shrink: 0; }
+.closed-today-header.collapsed svg { transform: rotate(-90deg); }
+.closed-today-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.closed-today-row:last-child { border-bottom: none; }
+.closed-today-row .ticker { font-weight: 700; font-family: var(--font-mono); }
+.closed-today-row .pnl { font-family: var(--font-mono); font-weight: 700; white-space: nowrap; }
+@media (max-width: 640px) {
+  #positions-table tbody tr.closed-row { display: none; }
+  .closed-today-mobile { display: block; margin-top: 0.9rem; }
+}
+
+.chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.6rem;
+}
+.chip {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  background: var(--green-soft, rgba(23,166,114,.12));
+  color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 35%, var(--border));
+}
+
 /* ---------- Banner "Dinero real" -- visible para todos los usuarios,
    pero BLOQUEADO (solo informativo) hasta que el administrador habilite
    el acceso real. 2026-09-13, a pedido explicito del usuario: "crea la
@@ -720,6 +817,7 @@ tr:last-child td { border-bottom: none; }
   transition: filter 0.15s ease;
 }
 .btn-secondary:hover { filter: brightness(1.08); }
+.btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
 
 .btn-close-position {
   padding: 0.3rem 0.6rem;
@@ -735,6 +833,32 @@ tr:last-child td { border-bottom: none; }
 }
 .btn-close-position:hover { background: var(--red); color: white; }
 .btn-close-position:disabled { opacity: 0.6; cursor: default; }
+
+.danger-zone {
+  margin-top: 1.2rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--border);
+}
+.danger-zone-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--red);
+  margin: 0 0 0.4rem;
+}
+.btn-danger {
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--red);
+  background: transparent;
+  color: var(--red);
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.btn-danger:hover { background: var(--red); color: white; }
 
 .tech-bias {
   display: flex;
@@ -820,6 +944,13 @@ canvas { max-width: 100%; }
   box-shadow: var(--shadow);
   width: 320px;
   max-width: calc(100vw - 40px);
+  /* Bug real encontrado 2026-09-14: sin esto, un modal con muchos campos
+     (Configuracion crecio bastante esta sesion: sizing, zona de peligro)
+     se extendia mas alla del borde inferior de la pantalla en celulares,
+     dejando los botones de Guardar/Actualizar literalmente fuera de la
+     vista, sin forma de scrollear para llegar a ellos. */
+  max-height: calc(100vh - 84px);
+  overflow-y: auto;
 }
 @media (max-width: 480px) {
   .modal-card { left: 20px; right: 20px; width: auto; }
@@ -1002,9 +1133,6 @@ input[type="range"].risk-slider::-moz-range-thumb {
    Claude Design "Main.dc.html", 2026-09-13, a pedido explicito del
    usuario -- solo visual, sin tocar la logica de tamano de operacion) */
 @media (max-width: 640px) {
-  #resumen.cards { grid-template-columns: 1fr 1fr; }
-  #resumen .card-hero { grid-column: 1 / -1; }
-
   #positions-table, #history-table { display: block; }
   #positions-table thead, #history-table thead { display: none; }
   #positions-table tbody, #history-table tbody { display: block; }

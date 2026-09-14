@@ -214,17 +214,30 @@ ESTIMATED_ATM_PREMIUM_PCT = 0.02
 
 def estimate_affordable_symbols(
     symbols: list[str], account_value: float, risk_pct: float, available_cash: float,
-    multiplier: float = 100.0,
+    multiplier: float = 100.0, sizing_mode: str = "auto", fixed_contracts: int = 1,
 ) -> list[str]:
     """Filtra `symbols` a los que probablemente tengan al menos un contrato
     ATM que entre en el riesgo/cash de esta cuenta, usando SOLO el precio
     spot actual (ya cacheado por market_data, sin llamadas nuevas por
     ticker) -- mucho mas barato que correr las 5 estrategias completas
-    sobre un ticker que de entrada no tiene chance de ser comprable."""
+    sobre un ticker que de entrada no tiene chance de ser comprable.
+
+    Bug real encontrado 2026-09-14: este pre-filtro SIEMPRE calculaba el
+    presupuesto por risk_pct (modo automatico), incluso para cuentas en
+    modo MANUAL -- una cuenta con $10,000 y 10 contratos fijos quedaba
+    filtrada como si solo tuviera 2% de riesgo (~$200), descartando de
+    entrada tickers que en realidad si podia pagar. Ahora el presupuesto
+    sigue el MISMO criterio que compute_quantity() usa para la decision
+    real: en modo manual, el limite es el cash disponible para
+    `fixed_contracts` unidades (sin tope de riesgo); en modo automatico,
+    sigue siendo risk_pct% de la cuenta (o el cash, lo que sea menor)."""
     from webapp import market_data
 
-    budget = min(account_value * (risk_pct / 100.0), available_cash)
-    if budget <= 0:
+    if sizing_mode == "manual":
+        budget_per_contract = available_cash / max(fixed_contracts, 1)
+    else:
+        budget_per_contract = min(account_value * (risk_pct / 100.0), available_cash)
+    if budget_per_contract <= 0:
         return []
 
     overview = market_data.get_watchlist_overview(symbols)
@@ -237,6 +250,6 @@ def estimate_affordable_symbols(
             affordable.append(symbol)  # sin dato confiable -- no se descarta a ciegas
             continue
         estimated_cost = spot * ESTIMATED_ATM_PREMIUM_PCT * multiplier
-        if estimated_cost <= budget:
+        if estimated_cost <= budget_per_contract:
             affordable.append(symbol)
     return affordable
