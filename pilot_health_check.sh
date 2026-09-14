@@ -10,6 +10,23 @@ cd /opt/bot-familiar-real-pilot || exit 1
 
 HEALTH_LOG="/opt/bot-familiar-real-pilot/health.log"
 PROBLEMS=()
+REPAIRS=()
+
+# 0. Auto-reparacion del bit de ejecucion (2026-09-14, bug real: un
+#    commit hecho desde Windows no preserva el bit +x de Linux -- el
+#    `git pull` del propio ciclo del piloto piso los scripts locales
+#    con la version del repo SIN +x, y el cron los invocaba directo
+#    (no via `bash script.sh`) asi que fallaron en silencio durante
+#    ~5 horas en horario de mercado sin dejar ningun rastro. Con las
+#    entradas del cron ahora usando `bash script.sh` explicito esto ya
+#    no puede volver a tumbar el cron -- pero se repara aca igual, de
+#    resguardo, por si alguna vez se invoca directo de nuevo.
+for script in run_pilot.sh pilot_health_check.sh run_proximity.sh pilot_cycle.py; do
+    if [ -f "$script" ] && [ ! -x "$script" ]; then
+        chmod +x "$script"
+        REPAIRS+=("$script no tenia permiso de ejecucion -- reparado solo (chmod +x).")
+    fi
+done
 
 # 1. El log de entradas creciendo? SOLO durante horario de mercado
 #    (13-19 UTC, lun-vie) -- fuera de ese horario el cron ni corre, asi
@@ -62,8 +79,16 @@ if ! claude auth status 2>&1 | grep -q '"loggedIn": true'; then
 fi
 
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-if [ ${#PROBLEMS[@]} -eq 0 ]; then
+if [ ${#REPAIRS[@]} -gt 0 ]; then
+    echo "$TIMESTAMP -- ${#REPAIRS[@]} reparacion(es) automatica(s):" >> "$HEALTH_LOG"
+    for r in "${REPAIRS[@]}"; do
+        echo "  - $r" >> "$HEALTH_LOG"
+    done
+fi
+if [ ${#PROBLEMS[@]} -eq 0 ] && [ ${#REPAIRS[@]} -eq 0 ]; then
     echo "$TIMESTAMP -- OK, sin problemas." >> "$HEALTH_LOG"
+elif [ ${#PROBLEMS[@]} -eq 0 ]; then
+    echo "$TIMESTAMP -- OK, sin problemas (con reparacion automatica arriba)." >> "$HEALTH_LOG"
 else
     echo "$TIMESTAMP -- ${#PROBLEMS[@]} problema(s):" >> "$HEALTH_LOG"
     for p in "${PROBLEMS[@]}"; do
@@ -71,6 +96,13 @@ else
     done
     PROBLEM_TEXT=$(printf '%s\n' "${PROBLEMS[@]}")
     claude -p "Mandale al usuario una notificacion push con este resumen EXACTO (no lo cambies, no agregues nada): 'Piloto de dinero real -- problema detectado: $PROBLEM_TEXT'. Usa la herramienta PushNotification. No hagas nada mas." \
+      --allowedTools "PushNotification" \
+      --permission-prompts none \
+      --output-format text >> "$HEALTH_LOG" 2>&1
+fi
+if [ ${#REPAIRS[@]} -gt 0 ]; then
+    REPAIR_TEXT=$(printf '%s\n' "${REPAIRS[@]}")
+    claude -p "Mandale al usuario una notificacion push con este resumen EXACTO (no lo cambies, no agregues nada): 'Piloto de dinero real -- reparacion automatica: $REPAIR_TEXT'. Usa la herramienta PushNotification. No hagas nada mas." \
       --allowedTools "PushNotification" \
       --permission-prompts none \
       --output-format text >> "$HEALTH_LOG" 2>&1
