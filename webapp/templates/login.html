@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acceso — Bot Familiar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="icon" href="{{ url_for('static', filename='img/logo.ico') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="theme-color" content="#0b0d12">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/icon-192.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <div class="login-mark">FAM</div>
+    <h1>Bot Familiar</h1>
+    <p class="muted small">Acceso privado — solo local</p>
+    {% if error %}
+      <div class="alert">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('login') }}">
+      <label for="username">Usuario</label>
+      <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+
+      <label for="password">Contrasena</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required>
+
+      <button type="submit">Entrar</button>
+    </form>
+    <p class="muted small" style="margin-top:1rem;text-align:center;">
+      ¿No tenés cuenta? <a href="{{ url_for('signup') }}">Crear cuenta</a>
+    </p>
+    <p class="muted small" style="margin-top:0.6rem;text-align:center;">
+      <a href="{{ url_for('terms') }}">Términos y Condiciones</a>
+    </p>
+  </div>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/static/service-worker.js").catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>

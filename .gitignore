@@ -1,0 +1,14 @@
+# Datos reales -- bases de datos de usuarios, logs, locks, secretos.
+# NUNCA debe subirse nada de esto a GitHub.
+data/
+__pycache__/
+*.pyc
+venv/
+*.log
+*.lock
+.env
+*.env
+
+# Otros
+.DS_Store
+Thumbs.db

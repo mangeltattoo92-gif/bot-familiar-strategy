@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crear cuenta — Bot Familiar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="icon" href="{{ url_for('static', filename='img/logo.ico') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="theme-color" content="#0b0d12">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/icon-192.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <div class="login-mark">FAM</div>
+    <h1>Crear cuenta</h1>
+    <p class="muted small">Bot Familiar — cada quien con su propia cuenta y capital</p>
+    {% if error %}
+      <div class="alert">{{ error }}</div>
+    {% endif %}
+    {% if success %}
+      <div class="alert" style="border-color:var(--green);color:var(--green);">{{ success }}</div>
+      <p class="muted small" style="text-align:center;"><a href="{{ url_for('login') }}">Volver a iniciar sesión</a></p>
+    {% else %}
+    <form method="post" action="{{ url_for('signup') }}">
+      <label for="username">Usuario</label>
+      <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+
+      <label for="email">Correo electrónico</label>
+      <input type="email" id="email" name="email" autocomplete="email" required>
+
+      <label for="password">Contraseña</label>
+      <input type="password" id="password" name="password" autocomplete="new-password" required minlength="6">
+
+      <label for="initial_capital">Capital inicial (simulado, en USD)</label>
+      <input type="number" id="initial_capital" name="initial_capital" min="100" step="100" value="1000" required>
+
+      <label style="display:flex; align-items:flex-start; gap:0.5rem; font-weight:400; cursor:pointer; margin-top:1rem;">
+        <input type="checkbox" name="terms_accepted" required style="margin-top:0.2rem; flex-shrink:0;">
+        <span>Leí y acepto los <a href="{{ url_for('terms') }}" target="_blank">Términos y Condiciones y el Aviso de Riesgo</a>. Entiendo que esta herramienta no da asesoría financiera y que opero bajo mi propia responsabilidad.</span>
+      </label>
+
+      <button type="submit">Registrarme</button>
+    </form>
+    <p class="muted small" style="margin-top:1rem;text-align:center;">
+      Tu cuenta queda pendiente hasta que el administrador la apruebe — te va a llegar un código para activarla.
+      El capital es SIMULADO por ahora (dinero real llega mas adelante) — se usa para elegir contratos acordes a tu presupuesto.
+    </p>
+    <p class="muted small" style="text-align:center;"><a href="{{ url_for('login') }}">Ya tengo cuenta</a></p>
+    {% endif %}
+  </div>
+</body>
+</html>

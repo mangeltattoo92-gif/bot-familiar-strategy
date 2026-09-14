@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Términos y Condiciones — Bot Familiar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="icon" href="{{ url_for('static', filename='img/logo.ico') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <meta name="theme-color" content="#0b0d12">
+  <style>
+    .terms-wrap { max-width: 760px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+    .terms-wrap h1 { font-size: 1.5rem; margin-bottom: 0.2rem; }
+    .terms-wrap .meta { color: var(--muted); font-size: 0.82rem; margin-bottom: 1.8rem; }
+    .terms-wrap section { margin-bottom: 1.8rem; }
+    .terms-wrap h2 { font-size: 1rem; margin-bottom: 0.6rem; color: var(--text); }
+    .terms-wrap h3 { font-size: 0.88rem; margin: 1rem 0 0.4rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+    .terms-wrap p, .terms-wrap li { font-size: 0.9rem; line-height: 1.6; color: var(--text); }
+    .terms-wrap ul { padding-left: 1.2rem; margin: 0.4rem 0; }
+    .terms-wrap li { margin-bottom: 0.4rem; }
+    .terms-wrap .allcaps { text-transform: uppercase; font-size: 0.82rem; line-height: 1.6; color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.9rem 1rem; }
+    .placeholder { color: var(--amber); font-style: italic; }
+    .warn-box {
+      background: var(--red-soft); border: 1px solid var(--red); border-radius: var(--radius-md);
+      padding: 1rem 1.2rem; margin-bottom: 1.8rem; font-size: 0.88rem; line-height: 1.55;
+    }
+    .warn-box strong { color: var(--red); }
+    .back-link { display: inline-block; margin-bottom: 1.5rem; }
+    .toc { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem 1.3rem; margin-bottom: 1.8rem; }
+    .toc a { display: block; font-size: 0.85rem; padding: 0.15rem 0; }
+  </style>
+</head>
+<body>
+  <div class="terms-wrap">
+    <a class="link back-link" href="{{ url_for('dashboard') }}">&larr; Volver</a>
+    <h1>Términos y Condiciones · Aviso de Riesgo</h1>
+    <p class="meta">Bot Familiar · Versión 1.2 · Vigente desde el 13/09/2026 · Aplicable a usuarios residentes en Estados Unidos</p>
+
+    <div class="warn-box">
+      <strong>Aviso importante:</strong> Bot Familiar es una herramienta de software automatizada
+      ("el Bot", "el Servicio"). No es un broker-dealer registrado, no es un asesor de inversiones
+      registrado ante la SEC ni ante ningún estado, y nada de lo que este documento, el panel o
+      cualquier comunicación del Bot digan constituye asesoría financiera, legal, impositiva o de
+      inversión de ningún tipo. Este documento fue redactado por el operador del Servicio con
+      asistencia de inteligencia artificial, tomando como referencia estructuras usuales en acuerdos
+      de brokers reales (Robinhood, Charles Schwab, Interactive Brokers, entre otros) — pero
+      <strong>no reemplaza la revisión de un abogado admitido a ejercer en Estados Unidos</strong>.
+      Antes de operar con dinero real, se recomienda consultar con un profesional legal y financiero
+      calificado.
+    </div>
+
+    <div class="toc">
+      <a href="#s1">1. Definiciones</a>
+      <a href="#s2">2. Elegibilidad</a>
+      <a href="#s3">3. Descripción del Servicio</a>
+      <a href="#s4">4. No es Asesoría Financiera, Legal ni de Inversión</a>
+      <a href="#s5">5. Reconocimiento de Riesgo — Operaciones con Opciones</a>
+      <a href="#s6">6. Modo Simulado vs. Dinero Real</a>
+      <a href="#s7">7. Servicios y Marcas de Terceros</a>
+      <a href="#s8">8. Exclusión de Garantías</a>
+      <a href="#s9">9. Limitación de Responsabilidad</a>
+      <a href="#s10">10. Indemnización</a>
+      <a href="#s11">11. Privacidad de los Datos de Cada Cuenta</a>
+      <a href="#s12">12. Propiedad Intelectual</a>
+      <a href="#s13">13. Suspensión y Terminación</a>
+      <a href="#s14">14. Resolución de Disputas — Arbitraje y Renuncia a Acción Colectiva</a>
+      <a href="#s15">15. Fuerza Mayor</a>
+      <a href="#s16">16. Divisibilidad</a>
+      <a href="#s17">17. Acuerdo Completo</a>
+      <a href="#s18">18. Modificaciones a Estos Términos</a>
+      <a href="#s19">19. Ley Aplicable y Jurisdicción</a>
+      <a href="#s20">20. Consentimiento de Comunicaciones Electrónicas</a>
+      <a href="#s21">21. Contacto</a>
+      <a href="#s22">22. Aceptación</a>
+    </div>
+
+    <section id="s1">
+      <h2>1. Definiciones</h2>
+      <ul>
+        <li><strong>"Servicio" / "Bot":</strong> la herramienta de software Bot Familiar, incluyendo su
+        panel web, sus procesos automatizados de escaneo y ejecución (simulada o real) de operaciones,
+        y toda comunicación generada por ella.</li>
+        <li><strong>"Operador":</strong> la persona que desarrolla, mantiene y aloja el Servicio en su
+        propia infraestructura.</li>
+        <li><strong>"Usuario" / "Cuenta":</strong> cualquier persona que se registra y utiliza el
+        Servicio bajo su propio nombre y capital.</li>
+        <li><strong>"Corretaje Conectado":</strong> la cuenta de corretaje de terceros (por ejemplo,
+        Robinhood) que un Usuario decide vincular al Servicio por su propia cuenta y bajo su propia
+        autorización, para operar con dinero real.</li>
+      </ul>
+    </section>
+
+    <section id="s2">
+      <h2>2. Elegibilidad</h2>
+      <p>Para usar el Servicio, el Usuario declara y garantiza que:</p>
+      <ul>
+        <li>Tiene al menos 18 años de edad y capacidad legal para celebrar contratos vinculantes.</li>
+        <li>Es residente de Estados Unidos.</li>
+        <li>Toda la información provista al registrarse (usuario, correo electrónico) es veraz.</li>
+        <li>Si en algún momento conecta un Corretaje Conectado, esa cuenta de corretaje está a su
+        propio nombre, en cumplimiento de los términos de esa institución, y él/ella es el único
+        titular autorizado para operarla.</li>
+      </ul>
+      <p>El Operador se reserva el derecho de rechazar, suspender o cancelar el acceso de cualquier
+      Usuario que no cumpla con estos requisitos.</p>
+    </section>
+
+    <section id="s3">
+      <h2>3. Descripción del Servicio</h2>
+      <p>Bot Familiar escanea datos de mercado públicos y ejecuta (en modo simulado, o real cuando
+      esté habilitado y conectado por el propio Usuario) operaciones de opciones sobre acciones según
+      reglas técnicas predefinidas (bandas de Bollinger y estrategias relacionadas: <em>squeeze
+      breakout</em>, <em>gap fade</em>, <em>giro SMA20</em>). Cada Usuario:</p>
+      <ul>
+        <li>Opera bajo su propio nombre, con su propio capital, y asume su propio riesgo.</li>
+        <li>No delega la gestión de su dinero a ninguna otra persona, incluido el Operador.</li>
+        <li>Es libre de desconectar su cuenta, pausar el Bot, ajustar sus parámetros de riesgo, o
+        dejar de usar el Servicio en cualquier momento.</li>
+      </ul>
+      <p>El Operador NO gestiona, recomienda, ni ejecuta operaciones en nombre de otros Usuarios.
+      Cada cuenta conectada opera de forma completamente independiente, con parámetros propios
+      (tamaño de posición, riesgo por operación, watchlist).</p>
+      <p><strong>El Servicio se ofrece sin fines de lucro.</strong> El Operador no cobra cuota,
+      suscripción ni comisión alguna por el uso del Servicio, y no recibe ninguna compensación atada
+      al capital administrado ni al resultado de las operaciones de ningún Usuario. Esto refuerza que
+      el Operador no actúa como asesor de inversiones compensado ni como gestor de patrimonio de
+      terceros — es una herramienta compartida entre familiares, sin ánimo comercial.</p>
+    </section>
+
+    <section id="s4">
+      <h2>4. No es Asesoría Financiera, Legal ni de Inversión</h2>
+      <p>Ninguna señal, operación, resultado mostrado en el panel, ni comunicación del Bot o del
+      Operador constituye una recomendación personalizada de inversión, ni una oferta o solicitud
+      para comprar o vender ningún valor. Las estrategias implementadas son reglas técnicas genéricas,
+      no adaptadas a la situación financiera, objetivos, horizonte temporal ni tolerancia al riesgo de
+      ninguna persona en particular. El Operador no es un asesor de inversiones registrado (RIA) ni un
+      broker-dealer registrado ante la <em>Securities and Exchange Commission</em> (SEC) ni ante
+      ningún regulador estatal. Cada Usuario es el único responsable de evaluar si el uso de esta
+      herramienta es adecuado para su propia situación, y de determinar la idoneidad ("suitability")
+      de operar opciones — esa determinación corresponde, en última instancia, al propio Corretaje
+      Conectado del Usuario, no a este Servicio.</p>
+    </section>
+
+    <section id="s5">
+      <h2>5. Reconocimiento de Riesgo — Operaciones con Opciones</h2>
+      <p>Operar opciones sobre acciones no es adecuado para todos los inversores e implica un riesgo
+      significativo, incluyendo la posibilidad de <strong>pérdida total del capital destinado a esta
+      herramienta en un período corto de tiempo</strong>. Antes de operar opciones, todo Corretaje
+      Conectado debe haberle provisto (y el Usuario debe haber leído) el documento
+      <em>"Characteristics and Risks of Standardized Options"</em> publicado por The Options Clearing
+      Corporation (OCC), como exige la normativa de FINRA. El Usuario reconoce específicamente que:</p>
+      <ul>
+        <li>El rendimiento pasado (incluido cualquier resultado mostrado en modo simulado) no
+        garantiza ni permite predecir resultados futuros.</li>
+        <li>Los mercados financieros son impredecibles; ninguna estrategia, por más probada que esté
+        en datos históricos, elimina el riesgo de pérdida.</li>
+        <li>Los resultados en modo simulado (paper trading) pueden diferir sustancialmente de los
+        resultados con dinero real, por factores como slippage, spreads reales, liquidez, y
+        limitaciones de ejecución que una simulación no captura por completo.</li>
+        <li>El apalancamiento implícito de las opciones puede amplificar tanto ganancias como
+        pérdidas.</li>
+      </ul>
+    </section>
+
+    <section id="s6">
+      <h2>6. Modo Simulado vs. Dinero Real</h2>
+      <p>Por defecto, el Servicio opera en modo <strong>simulado (paper trading)</strong>: no coloca
+      órdenes reales, no mueve dinero real. Si en el futuro se habilita la conexión con un Corretaje
+      Conectado (por ejemplo, Robinhood, vía su función de "Agentic Trading"), esa conexión:</p>
+      <ul>
+        <li>Es siempre iniciada y autorizada directamente por cada Usuario desde su propia cuenta de
+        corretaje, nunca por el Operador ni por ningún tercero en su nombre.</li>
+        <li>Opera exclusivamente sobre el capital que esa persona decida depositar en su propia
+        cuenta de corretaje, separado del resto de su patrimonio.</li>
+        <li>Puede pausarse o desconectarse por el Usuario en cualquier momento, desde su propio
+        Corretaje Conectado o desde el panel del Servicio.</li>
+        <li>Queda sujeta, en todo momento, a los términos de servicio, políticas y controles de
+        riesgo del propio Corretaje Conectado — el Servicio no puede saltar ni anular esos controles.</li>
+      </ul>
+    </section>
+
+    <section id="s7">
+      <h2>7. Servicios y Marcas de Terceros</h2>
+      <p>El Servicio utiliza datos de mercado de terceros (incluyendo, entre otros, Yahoo Finance) y,
+      cuando esté habilitado, se conecta a la infraestructura de Robinhood Markets, Inc. ("Robinhood")
+      mediante su función de Agentic Trading. <strong>El Servicio no está afiliado, patrocinado,
+      respaldado ni verificado por Robinhood Markets, Inc. ni por Yahoo Finance.</strong> "Robinhood"
+      y cualquier otra marca de terceros mencionada pertenecen a sus respectivos dueños y se usan aquí
+      únicamente con fines descriptivos. El Operador no es responsable por la exactitud, disponibilidad
+      ni continuidad de los servicios de estos terceros, ni por cambios que dichos terceros realicen a
+      sus propias APIs, políticas o disponibilidad, que puedan afectar el funcionamiento del Servicio
+      sin previo aviso.</p>
+    </section>
+
+    <section id="s8">
+      <h2>8. Exclusión de Garantías</h2>
+      <p class="allcaps">EL SERVICIO SE PROVEE "TAL CUAL" ("AS IS") Y "SEGÚN DISPONIBILIDAD" ("AS
+      AVAILABLE"), SIN GARANTÍAS DE NINGÚN TIPO, YA SEAN EXPRESAS, IMPLÍCITAS O LEGALES, INCLUYENDO
+      SIN LIMITACIÓN LAS GARANTÍAS IMPLÍCITAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO
+      PARTICULAR, TÍTULO Y NO INFRACCIÓN. EL OPERADOR NO GARANTIZA QUE EL SERVICIO SEA ININTERRUMPIDO,
+      OPORTUNO, SEGURO, LIBRE DE ERRORES, O QUE LOS DATOS DE MERCADO O SEÑALES GENERADAS SEAN
+      EXACTOS, COMPLETOS O RESULTEN EN OPERACIONES RENTABLES.</p>
+    </section>
+
+    <section id="s9">
+      <h2>9. Limitación de Responsabilidad</h2>
+      <p class="allcaps">EN LA MÁXIMA MEDIDA PERMITIDA POR LA LEY APLICABLE, EL OPERADOR NO SERÁ
+      RESPONSABLE ANTE NINGÚN USUARIO POR NINGÚN DAÑO INDIRECTO, INCIDENTAL, ESPECIAL, CONSECUENTE,
+      PUNITIVO, O POR LUCRO CESANTE O PÉRDIDA DE CAPITAL, DERIVADOS DEL USO O LA IMPOSIBILIDAD DE USO
+      DEL SERVICIO, INCLUYENDO SIN LIMITACIÓN: ERRORES DE SOFTWARE, INTERRUPCIONES DEL SERVICIO,
+      SEÑALES INCORRECTAS, DEMORAS EN DATOS DE MERCADO, FALLAS DE TERCEROS (CORRETAJE CONECTADO,
+      PROVEEDORES DE DATOS), O DECISIONES DE INVERSIÓN TOMADAS POR EL USUARIO. EN NINGÚN CASO LA
+      RESPONSABILIDAD TOTAL Y ACUMULADA DEL OPERADOR HACIA UN USUARIO, POR CUALQUIER CAUSA, EXCEDERÁ
+      CIEN DÓLARES ESTADOUNIDENSES (US$100). ALGUNAS JURISDICCIONES NO PERMITEN LA EXCLUSIÓN O
+      LIMITACIÓN DE CIERTOS DAÑOS, POR LO QUE ALGUNAS DE ESTAS LIMITACIONES PUEDEN NO APLICAR EN SU
+      TOTALIDAD A UN USUARIO EN PARTICULAR.</p>
+    </section>
+
+    <section id="s10">
+      <h2>10. Indemnización</h2>
+      <p>El Usuario acepta indemnizar y mantener indemne al Operador frente a cualquier reclamo,
+      pérdida, responsabilidad o gasto (incluyendo honorarios razonables de abogados) que surja de: (a)
+      el uso del Servicio por parte del Usuario, (b) su conexión y operación de un Corretaje Conectado,
+      (c) su incumplimiento de estos Términos, o (d) su violación de cualquier ley o derecho de un
+      tercero.</p>
+    </section>
+
+    <section id="s11">
+      <h2>11. Privacidad de los Datos de Cada Cuenta</h2>
+      <p>El panel de administrador del Servicio NO muestra el balance, ganancias/pérdidas ni
+      posiciones abiertas de ningún Usuario en el uso normal del sistema — esa información es privada
+      de cada cuenta. Solo se muestra actividad general (qué ticker se operó, compra o venta, en qué
+      momento) con fines de soporte técnico. Cualquier excepción temporal a esta regla se comunica
+      explícitamente dentro del panel mientras esté activa. El Operador no vende ni comparte los datos
+      de los Usuarios con terceros con fines comerciales.</p>
+    </section>
+
+    <section id="s12">
+      <h2>12. Propiedad Intelectual</h2>
+      <p>El código, diseño, estrategias y demás contenido del Servicio son propiedad del Operador.
+      Se le otorga al Usuario una licencia limitada, personal, no exclusiva y no transferible para
+      usar el Servicio conforme a estos Términos. Queda prohibido copiar, distribuir o crear obras
+      derivadas del Servicio sin autorización expresa.</p>
+    </section>
+
+    <section id="s13">
+      <h2>13. Suspensión y Terminación</h2>
+      <p>El Operador puede suspender o terminar el acceso de cualquier Usuario en cualquier momento,
+      con o sin causa, incluyendo por incumplimiento de estos Términos. El Usuario puede dejar de usar
+      el Servicio y desconectar su Corretaje Conectado en cualquier momento. La terminación no afecta
+      las cláusulas que por su naturaleza deben sobrevivir (incluyendo, sin limitación, las Secciones
+      8, 9, 10 y 14).</p>
+    </section>
+
+    <section id="s14">
+      <h2>14. Resolución de Disputas — Arbitraje y Renuncia a Acción Colectiva</h2>
+      <p>Cualquier disputa que surja de o esté relacionada con estos Términos o el uso del Servicio se
+      resolverá mediante <strong>arbitraje vinculante e individual</strong>, en lugar de en un
+      tribunal, salvo que la ley aplicable disponga lo contrario. <strong>Tanto el Usuario como el
+      Operador renuncian a su derecho a un juicio por jurado y a participar en una acción colectiva
+      ("class action") o representativa.</strong> Cualquiera de las partes puede optar por excluirse de
+      esta cláusula de arbitraje notificando por escrito dentro de los 30 días posteriores a la
+      aceptación de estos Términos.</p>
+    </section>
+
+    <section id="s15">
+      <h2>15. Fuerza Mayor</h2>
+      <p>El Operador no será responsable por incumplimientos o demoras causados por circunstancias
+      fuera de su control razonable, incluyendo fallas de infraestructura de internet o de la nube,
+      caídas de proveedores de datos o del Corretaje Conectado, desastres naturales, actos
+      gubernamentales, o interrupciones generalizadas del mercado financiero.</p>
+    </section>
+
+    <section id="s16">
+      <h2>16. Divisibilidad</h2>
+      <p>Si alguna disposición de estos Términos fuera considerada inválida o inaplicable por un
+      tribunal competente, dicha disposición se limitará o eliminará en la medida mínima necesaria, y
+      el resto de los Términos permanecerá en pleno vigor y efecto.</p>
+    </section>
+
+    <section id="s17">
+      <h2>17. Acuerdo Completo</h2>
+      <p>Estos Términos, junto con cualquier política adicional publicada en el Servicio, constituyen
+      el acuerdo completo entre el Usuario y el Operador respecto del Servicio, y reemplazan cualquier
+      acuerdo previo, oral o escrito, sobre el mismo objeto.</p>
+    </section>
+
+    <section id="s18">
+      <h2>18. Modificaciones a Estos Términos</h2>
+      <p>Estos Términos pueden actualizarse. Los cambios sustantivos se reflejan con una nueva versión
+      y fecha en la parte superior de este documento. El uso continuado del Servicio después de un
+      cambio implica la aceptación de los nuevos Términos. Se recomienda revisar este documento
+      periódicamente.</p>
+    </section>
+
+    <section id="s19">
+      <h2>19. Ley Aplicable y Jurisdicción</h2>
+      <p>Estos Términos se rigen por las leyes federales de Estados Unidos y las leyes del Estado de
+      Florida, sin dar efecto a sus disposiciones sobre conflicto de leyes. Sujeto a la cláusula de
+      arbitraje de la Sección 14, cualquier acción judicial permitida se presentará exclusivamente
+      ante los tribunales estatales o federales ubicados en el Estado de Florida.</p>
+    </section>
+
+    <section id="s20">
+      <h2>20. Consentimiento de Comunicaciones Electrónicas</h2>
+      <p>Al usar el Servicio, el Usuario consiente recibir comunicaciones electrónicamente (correo
+      electrónico, notificaciones dentro del panel) en lugar de en papel, incluyendo avisos sobre
+      estos Términos, códigos de activación, y alertas relacionadas con su cuenta.</p>
+    </section>
+
+    <section id="s21">
+      <h2>21. Contacto</h2>
+      <p>Consultas sobre estos Términos pueden dirigirse al Operador a través del correo electrónico
+      registrado en el Servicio.</p>
+    </section>
+
+    <section id="s22">
+      <h2>22. Aceptación</h2>
+      <p>Al registrar una cuenta y marcar la casilla de aceptación en el formulario de registro, cada
+      Usuario confirma que leyó este documento en su totalidad, entiende los riesgos descritos, cumple
+      con los requisitos de elegibilidad de la Sección 2, y acepta operar bajo su propia
+      responsabilidad y bajo estos Términos.</p>
+    </section>
+  </div>
+</body>
+</html>

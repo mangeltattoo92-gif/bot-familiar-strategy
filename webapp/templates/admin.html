@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Panel de administrador — Bot Familiar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="icon" href="{{ url_for('static', filename='img/logo.ico') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="theme-color" content="#0b0d12">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/icon-192.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    .admin-badge { display:inline-flex; align-items:center; gap:0.4rem; padding:0.3rem 0.7rem; border-radius:999px; background:var(--accent-soft, rgba(91,110,248,.14)); color:var(--accent); font-size:0.72rem; font-weight:800; letter-spacing:0.04em; text-transform:uppercase; }
+    .proc-badge { display:inline-flex; align-items:center; gap:6px; font-size:0.78rem; font-weight:600; color: var(--muted); }
+    .proc-badge .dot { width:6px; height:6px; border-radius:50%; background:var(--muted); flex-shrink:0; }
+    .proc-badge.ok { color: var(--green); }
+    .proc-badge.ok .dot { background: var(--green); }
+    .proc-badge.bad { color: var(--red); }
+    .proc-badge.bad .dot { background: var(--red); }
+    #stat-pending.warn { color: var(--amber); }
+    #stat-disconnected.warn { color: var(--red); }
+    #stat-errors.warn { color: var(--red); }
+    .btn-approve { padding: 0.35rem 0.75rem; border: none; border-radius: var(--radius-sm); background: var(--green); color: #0a2e1f; font-size: 0.75rem; font-weight: 700; cursor: pointer; font-family: inherit; }
+    .btn-reject { padding: 0.35rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: none; color: var(--muted); font-size: 0.75rem; font-weight: 600; cursor: pointer; font-family: inherit; margin-left: 6px; }
+    .btn-reject:hover { color: var(--red); border-color: var(--red); }
+    .note-box { background: var(--bg-soft); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.85rem 1rem; font-size: 0.83rem; color: var(--muted); margin-bottom: 1.2rem; }
+    .code-banner { background: var(--green-soft, rgba(23,166,114,.12)); border: 1px solid var(--green); border-radius: var(--radius-sm); padding: 0.85rem 1rem; font-size: 0.9rem; margin-bottom: 1.2rem; }
+    .code-banner code { font-family: "JetBrains Mono", monospace; font-weight: 700; font-size: 1.1rem; }
+    .proc-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:0.7rem; margin-top:0.8rem; }
+    .proc-card { border:1px solid var(--border); border-radius:var(--radius-sm); padding:0.8rem 0.9rem; background:var(--panel-2); }
+    .proc-card .proc-name { font-size:0.8rem; font-weight:700; margin-bottom:0.4rem; font-family:"JetBrains Mono", monospace; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">FAM</span>
+      <span class="brand-name">Panel de <strong>administrador</strong></span>
+      <span class="admin-badge">Solo administrador</span>
+    </div>
+    <div class="topbar-right">
+      <span class="proc-badge" id="proc-summary"><span class="dot"></span>—/— procesos activos</span>
+      <div class="topbar-divider"></div>
+      <a class="link" href="{{ url_for('my_dashboard') }}">Mi panel</a>
+      <span class="user-chip" id="user-chip">{{ username[:1]|upper }}</span>
+      <a class="link" href="{{ url_for('logout') }}">Salir</a>
+    </div>
+  </header>
+
+  <main>
+    <div id="code-banner-wrap"></div>
+    <div class="note-box">
+      Este panel es solo para soporte técnico — permisos, conexión de cuentas y salud del sistema.
+      No muestra el balance, P&amp;L ni las posiciones de nadie; eso es privado de cada cuenta.
+    </div>
+
+    <section class="cards" id="stat-cards">
+      <div class="card">
+        <div class="card-label">Cuentas activas</div>
+        <div class="card-value" id="stat-active">—</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Solicitudes pendientes</div>
+        <div class="card-value" id="stat-pending">—</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Cuentas desconectadas</div>
+        <div class="card-value" id="stat-disconnected">—</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Errores hoy</div>
+        <div class="card-value" id="stat-errors">—</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Salud del sistema</h2>
+        <button class="btn-approve" onclick="runHeal()" id="heal-btn">Corregir ahora</button>
+      </div>
+      <div id="health-summary" class="muted" style="padding:0 0 0.4rem;">Cargando…</div>
+      <div class="proc-grid" id="proc-grid"></div>
+
+      <div id="problems-wrap" hidden>
+        <h3 style="margin-top:1.2rem;">Otros problemas detectados</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Tipo</th><th>Detalle</th></tr></thead>
+            <tbody id="health-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <h3 style="margin-top:1.2rem;">Errores recientes del sistema</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Cuándo</th><th>Origen</th><th>Mensaje</th></tr></thead>
+          <tbody id="errors-tbody"><tr><td colspan="3" class="muted">Cargando…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>Solicitudes pendientes</h2></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Usuario</th><th>Correo</th><th>Solicitado</th><th></th></tr></thead>
+          <tbody>
+            {% for u in pending %}
+            <tr id="row-pending-{{ u.id }}">
+              <td style="font-weight:600;">{{ u.username }}</td>
+              <td class="muted">{{ u.email }}</td>
+              <td class="muted">{{ u.created_at }}</td>
+              <td style="text-align:right;">
+                <button class="btn-approve" onclick="approve({{ u.id }}, '{{ u.username }}')">Aprobar y enviar código</button>
+                <button class="btn-reject" onclick="reject({{ u.id }})">Rechazar</button>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="muted">Sin solicitudes pendientes.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>Cuentas familiares</h2></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Usuario</th><th>Correo</th><th>Estado</th><th>Robinhood</th><th></th></tr></thead>
+          <tbody>
+            {% for u in users if u.status != 'pending' %}
+            <tr id="row-user-{{ u.id }}">
+              <td style="font-weight:600;">{{ u.username }}</td>
+              <td class="muted">{{ u.email }}</td>
+              <td>
+                {% if u.status == 'active' %}
+                  <span class="status-pill on"><span class="dot"></span>Conectado</span>
+                {% elif u.status == 'code_sent' %}
+                  <span class="status-pill premarket"><span class="dot"></span>Código enviado</span>
+                {% else %}
+                  <span class="status-pill off"><span class="dot"></span>Desconectado</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if u.robinhood_connected_at %}
+                  <span class="status-pill on"><span class="dot"></span>Autodeclarado listo</span>
+                {% else %}
+                  <span class="muted small">Sin conectar</span>
+                {% endif %}
+              </td>
+              <td style="text-align:right;">
+                {% if u.status == 'active' %}
+                  <button class="btn-reject" onclick="disconnectUser({{ u.id }})">Desconectar</button>
+                {% else %}
+                  <button class="btn-approve" onclick="reconnect({{ u.id }}, '{{ u.username }}')">Reconectar</button>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <details id="positions-details" open>
+        <summary style="cursor:pointer; font-weight:700; font-size:1.05rem;">Posiciones abiertas ahora (todas las cuentas) <span id="positions-count" class="muted" style="font-weight:400;"></span></summary>
+        <p class="muted small" style="margin:0.6rem 0;">P&amp;L visible TEMPORALMENTE para verificar que el motor esta funcionando -- se saca despues.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Usuario</th><th>Ticker</th><th>Tipo</th><th>Vencimiento</th><th>Abierta desde</th><th>P&amp;L</th></tr></thead>
+            <tbody id="positions-tbody">
+              <tr><td colspan="6" class="muted">Cargando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel">
+      <details id="trades-details">
+        <summary style="cursor:pointer; font-weight:700; font-size:1.05rem;">Entradas y salidas recientes (todas las cuentas)</summary>
+        <p class="muted small" style="margin:0.6rem 0;">Solo actividad (ticker, lado, estrategia) -- nunca precio, cantidad ni P&amp;L de ninguna cuenta.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Usuario</th><th>Hora</th><th>Ticker</th><th>Lado</th><th>Estrategia</th></tr></thead>
+            <tbody id="trades-tbody">
+              <tr><td colspan="5" class="muted">Cargando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+  </main>
+
+  <script>
+    function showCode(username, code, emailSent) {
+      const wrap = document.getElementById('code-banner-wrap');
+      const status = emailSent
+        ? `Se mandó por correo a <strong>${username}</strong> automáticamente.`
+        : `<span style="color:var(--amber);">No se pudo mandar el correo automático — pasáselo vos mismo.</span>`;
+      wrap.innerHTML = `<div class="code-banner">Código para <strong>${username}</strong>: <code>${code}</code><br>${status}</div>`;
+    }
+    async function approve(id, username) {
+      const res = await fetch(`/admin/approve/${id}`, { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) { showCode(username, data.activation_code, data.email_sent); location.reload(); }
+    }
+    async function reject(id) {
+      if (!confirm('¿Rechazar esta solicitud?')) return;
+      await fetch(`/admin/reject/${id}`, { method: 'POST' });
+      location.reload();
+    }
+    async function disconnectUser(id) {
+      if (!confirm('¿Desconectar esta cuenta?')) return;
+      await fetch(`/admin/disconnect/${id}`, { method: 'POST' });
+      location.reload();
+    }
+    async function reconnect(id, username) {
+      const res = await fetch(`/admin/reconnect/${id}`, { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) { showCode(username, data.activation_code, data.email_sent); location.reload(); }
+    }
+
+    const PROC_LABELS = {
+      'run_dashboard.py': 'Panel web',
+      'proximity_watch.py': 'Vigía de casi-señales',
+      'multi_user_entry_loop.py': 'Motor de entradas/salidas',
+      'watchdog.py': 'Censor de salud',
+    };
+
+    async function loadHealth() {
+      const res = await fetch('/admin/health');
+      const data = await res.json();
+
+      document.getElementById('stat-active').textContent = data.stats.active_users;
+      const pendingEl = document.getElementById('stat-pending');
+      pendingEl.textContent = data.stats.pending_count;
+      pendingEl.classList.toggle('warn', data.stats.pending_count > 0);
+      const disconnectedEl = document.getElementById('stat-disconnected');
+      disconnectedEl.textContent = data.stats.disconnected_users;
+      disconnectedEl.classList.toggle('warn', data.stats.disconnected_users > 0);
+      const errorsEl = document.getElementById('stat-errors');
+      errorsEl.textContent = data.stats.errors_today;
+      errorsEl.classList.toggle('warn', data.stats.errors_today > 0);
+
+      const upCount = data.processes.filter(p => p.running).length;
+      const procSummary = document.getElementById('proc-summary');
+      const allUp = upCount === data.processes.length;
+      procSummary.classList.toggle('ok', allUp);
+      procSummary.classList.toggle('bad', !allUp);
+      procSummary.innerHTML = `<span class="dot"></span>${upCount}/${data.processes.length} procesos activos`;
+
+      const grid = document.getElementById('proc-grid');
+      grid.innerHTML = '';
+      for (const p of data.processes) {
+        const card = document.createElement('div');
+        card.className = 'proc-card';
+        const pillClass = p.running ? 'on' : 'off';
+        const pillText = p.running ? 'Activo' : 'Caído';
+        card.innerHTML = `
+          <div class="proc-name">${PROC_LABELS[p.name] || p.name}</div>
+          <span class="status-pill ${pillClass}"><span class="dot"></span>${pillText}</span>
+        `;
+        grid.appendChild(card);
+      }
+
+      const summary = document.getElementById('health-summary');
+      const otherProblems = data.problems.filter(p => p.label !== 'Procesos de fondo');
+      const wrap = document.getElementById('problems-wrap');
+      const tbody = document.getElementById('health-tbody');
+      tbody.innerHTML = '';
+      if (data.problems.length === 0) {
+        summary.textContent = 'Sin problemas detectados.';
+        summary.style.color = 'var(--green)';
+      } else {
+        summary.textContent = `${data.problems.length} problema(s) detectado(s).`;
+        summary.style.color = 'var(--red)';
+      }
+      if (otherProblems.length > 0) {
+        wrap.hidden = false;
+        for (const p of otherProblems) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td style="font-weight:600;">${p.label}</td><td>${p.message}</td>`;
+          tbody.appendChild(tr);
+        }
+      } else {
+        wrap.hidden = true;
+      }
+
+      const errTbody = document.getElementById('errors-tbody');
+      errTbody.innerHTML = '';
+      if (data.recent_errors.length === 0) {
+        errTbody.innerHTML = '<tr><td colspan="3" class="muted">Sin errores registrados.</td></tr>';
+      } else {
+        for (const e of data.recent_errors) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td class="muted">${e.timestamp || ''}</td><td>${e.reason || ''}</td><td>${e.message || ''}</td>`;
+          errTbody.appendChild(tr);
+        }
+      }
+    }
+
+    async function runHeal() {
+      const btn = document.getElementById('heal-btn');
+      btn.disabled = true;
+      btn.textContent = 'Corrigiendo…';
+      try {
+        const res = await fetch('/admin/heal', { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+          alert('Acciones tomadas:\n' + data.actions.join('\n'));
+        } else {
+          alert('Error: ' + (data.error || 'desconocido'));
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Corregir ahora';
+        loadHealth();
+      }
+    }
+
+    async function loadTrades() {
+      const tbody = document.getElementById('trades-tbody');
+      let data;
+      try {
+        const res = await fetch('/admin/trades?limit=40');
+        data = await res.json();
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" class="negative">Error cargando: ${e}</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = '';
+      const usernames = data.usernames || [];
+      if (usernames.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="muted">Todavia no hay ninguna cuenta familiar activa.</td></tr>';
+        return;
+      }
+      const byUser = new Set((data.trades || []).map(t => t.username));
+      // Cuentas SIN ninguna operacion todavia -- se listan igual, para que
+      // se vean las 9 cuentas siempre, no solo las que ya operaron.
+      for (const u of usernames) {
+        if (!byUser.has(u)) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td style="font-weight:600;">${u}</td><td colspan="4" class="muted">Sin operaciones todavia.</td>`;
+          tbody.appendChild(tr);
+        }
+      }
+      for (const t of (data.trades || [])) {
+        const tr = document.createElement('tr');
+        const sideLabel = t.side === 'buy' ? 'Compra' : 'Venta';
+        const sideClass = t.side === 'buy' ? 'positive' : 'negative';
+        const detail = t.option_type ? `${t.ticker} (${t.option_type})` : t.ticker;
+        tr.innerHTML = `
+          <td style="font-weight:600;">${t.username}</td>
+          <td class="muted">${t.timestamp}</td>
+          <td>${detail}</td>
+          <td class="${sideClass}">${sideLabel}</td>
+          <td class="muted">${t.strategy || '—'}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function loadPositions() {
+      const tbody = document.getElementById('positions-tbody');
+      const countEl = document.getElementById('positions-count');
+      let data;
+      try {
+        const res = await fetch('/admin/positions');
+        data = await res.json();
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="6" class="negative">Error cargando: ${e}</td></tr>`;
+        return;
+      }
+      const usernames = data.usernames || [];
+      const positions = data.positions || [];
+      countEl.textContent = `(${positions.length} abierta${positions.length === 1 ? '' : 's'} en ${usernames.length} cuenta${usernames.length === 1 ? '' : 's'})`;
+      tbody.innerHTML = '';
+      if (usernames.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="muted">Todavia no hay ninguna cuenta familiar activa.</td></tr>';
+        return;
+      }
+      const byUser = new Set(positions.map(p => p.username));
+      // Cuentas SIN posiciones abiertas ahora -- se listan igual, para
+      // que se vean las 9 cuentas siempre, no solo las que tienen algo abierto.
+      for (const u of usernames) {
+        if (!byUser.has(u)) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td style="font-weight:600;">${u}</td><td colspan="5" class="muted">Sin posiciones abiertas ahora.</td>`;
+          tbody.appendChild(tr);
+        }
+      }
+      for (const p of positions) {
+        const tr = document.createElement('tr');
+        const detail = p.option_type ? `${p.ticker} (${p.option_type}${p.strike ? ' ' + p.strike : ''})` : p.ticker;
+        const pnlClass = p.unrealized_pnl >= 0 ? 'positive' : 'negative';
+        const pnlText = p.unrealized_pnl != null
+          ? `${p.unrealized_pnl >= 0 ? '+' : ''}$${p.unrealized_pnl.toFixed(2)} (${p.unrealized_pnl_pct != null ? p.unrealized_pnl_pct.toFixed(1) : '—'}%)`
+          : '—';
+        tr.innerHTML = `
+          <td style="font-weight:600;">${p.username}</td>
+          <td>${detail}</td>
+          <td class="muted">${p.asset_type}</td>
+          <td class="muted">${p.expiration || '—'}</td>
+          <td class="muted">${p.opened_at || '—'}</td>
+          <td class="${pnlClass}">${pnlText}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    loadHealth();
+    loadTrades();
+    loadPositions();
+    setInterval(loadHealth, 30000);
+    setInterval(loadTrades, 30000);
+    setInterval(loadPositions, 30000);
+  </script>
+</body>
+</html>

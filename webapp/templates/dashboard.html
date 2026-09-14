@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bot Familiar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="icon" href="{{ url_for('static', filename='img/logo.ico') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="theme-color" content="#0b0d12">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/icon-192.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">FAM</span>
+      <span class="brand-name">Bot <strong>Familiar</strong></span>
+    </div>
+    <nav class="topnav">
+      <a href="#resumen" data-target="resumen" class="active">Resumen</a>
+      <div class="nav-dropdown" id="nav-dropdown">
+        <button class="nav-dropdown-btn" id="nav-dropdown-btn" type="button" aria-haspopup="true" aria-expanded="false">
+          <span id="nav-dropdown-label">Más</span>
+          <svg class="nav-dropdown-chevron" viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M7 10l5 5 5-5z"/></svg>
+        </button>
+        <div class="nav-dropdown-menu" id="nav-dropdown-menu">
+          <a href="#posiciones" data-target="posiciones">Posiciones</a>
+          <a href="#historial" data-target="historial">Historial</a>
+          <a href="#mercado" data-target="mercado">Mercado</a>
+          <a href="#" id="real-money-nav-link">Dinero real 🔒</a>
+          {% if is_admin %}
+          <a href="{{ url_for('admin_panel') }}" style="font-weight:700;">Panel de administrador</a>
+          {% endif %}
+        </div>
+      </div>
+    </nav>
+    <div class="topbar-right">
+      <div class="status-group">
+        <div class="week-strip" id="week-strip" title="Días de operación (NYSE)"></div>
+        <button class="status-pill" id="market-status-btn" type="button" title="Estado del mercado">
+          <span class="dot"></span><span id="market-status-label">Comprobando mercado…</span>
+        </button>
+        <button class="status-pill" id="bot-toggle-btn" type="button" title="Encender/apagar el bot">
+          <span class="dot"></span><span id="bot-toggle-label">Comprobando bot…</span>
+        </button>
+      </div>
+      <div class="topbar-divider"></div>
+      <button class="theme-toggle" id="settings-btn" title="Configuracion de operativa" aria-label="Configuracion de operativa">
+        <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
+      </button>
+      <button class="theme-toggle" id="theme-toggle" title="Cambiar tema" aria-label="Cambiar tema">
+        <svg id="icon-sun" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 4.5a1 1 0 0 1-1-1V2a1 1 0 1 1 2 0v1.5a1 1 0 0 1-1 1Zm0 15a1 1 0 0 1 1 1V22a1 1 0 1 1-2 0v-1.5a1 1 0 0 1 1-1ZM4.5 12a1 1 0 0 1-1 1H2a1 1 0 1 1 0-2h1.5a1 1 0 0 1 1 1Zm18 0a1 1 0 0 1-1 1H20a1 1 0 1 1 0-2h1.5a1 1 0 0 1 1 1ZM6.34 6.34a1 1 0 0 1-1.41 0L3.87 5.28a1 1 0 1 1 1.41-1.41l1.06 1.06a1 1 0 0 1 0 1.41Zm12.02 12.02a1 1 0 0 1-1.41 0l-1.06-1.06a1 1 0 1 1 1.41-1.41l1.06 1.06a1 1 0 0 1 0 1.41ZM6.34 17.66a1 1 0 0 1 0 1.41l-1.06 1.06a1 1 0 1 1-1.41-1.41l1.06-1.06a1 1 0 0 1 1.41 0ZM18.36 5.28a1 1 0 0 1 0 1.41L17.3 7.75a1 1 0 1 1-1.41-1.41l1.06-1.06a1 1 0 0 1 1.41 0ZM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z"/></svg>
+        <svg id="icon-moon" viewBox="0 0 24 24" width="16" height="16" hidden><path fill="currentColor" d="M20.354 15.354A9 9 0 0 1 8.646 3.646a9.003 9.003 0 1 0 11.708 11.708Z"/></svg>
+      </button>
+      <div class="topbar-divider"></div>
+      <span class="user-chip" id="user-chip">{{ username[:1]|upper }}</span>
+      <a class="link" href="{{ url_for('logout') }}">Salir</a>
+    </div>
+  </header>
+
+  <main>
+   <div id="main-view">
+    <section class="cards" id="resumen">
+      <div class="card card-hero">
+        <div class="card-label">Valor total de la cuenta</div>
+        <div class="card-value" id="total-value">—</div>
+        <div class="card-sub" id="total-pnl-pct">—</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Balance virtual (cash)</div>
+        <div class="card-value" id="cash-balance">—</div>
+      </div>
+      <div class="card">
+        <div class="card-label">P&amp;L total</div>
+        <div class="card-value" id="total-pnl">—</div>
+        <div class="card-sub muted" id="pnl-breakdown">—</div>
+      </div>
+    </section>
+
+    <section class="real-money-banner" id="real-money-banner">
+      <div class="real-money-banner-icon">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </div>
+      <div class="real-money-banner-body">
+        <div class="real-money-banner-title">Dinero real <span class="badge-locked">Próximamente</span></div>
+        <div class="real-money-banner-sub">Conectá tu propia cuenta de corretaje para que el bot opere con capital real, bajo tu propio riesgo.</div>
+      </div>
+      <button class="btn-secondary real-money-banner-btn" id="real-money-open-btn" type="button">Ver más</button>
+    </section>
+
+    <section class="panel" id="panel-journal">
+      <div class="panel-head">
+        <h2>Rendimiento de operaciones</h2>
+      </div>
+      <div class="cards" id="weekly-summary-cards">
+        <div class="card">
+          <div class="card-label">Operaciones esta semana</div>
+          <div class="card-value" id="week-trades">—</div>
+          <div class="card-sub muted" id="week-trades-sub">—</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Ganadas / Perdidas</div>
+          <div class="card-value" id="week-win-loss">—</div>
+          <div class="card-sub muted" id="week-win-rate">—</div>
+        </div>
+        <div class="card">
+          <div class="card-label">P&amp;L de la semana</div>
+          <div class="card-value" id="week-pnl">—</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="posiciones">
+      <div class="panel-head">
+        <h2>Posiciones abiertas simuladas</h2>
+      </div>
+      <div class="table-wrap">
+        <table id="positions-table">
+          <thead>
+            <tr>
+              <th>Contratos</th>
+              <th>Vencimiento</th>
+              <th class="xsmall">Cantidad</th>
+              <th>Valor</th>
+              <th>Ganancia/Pérdida ($)</th>
+              <th>Precio entrada</th>
+              <th>Precio actual</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p class="muted empty-msg" id="positions-empty" hidden>Sin posiciones abiertas ni cerradas hoy todavía.</p>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-watchlist">
+      <div class="panel-head">
+        <h2>Watchlist <span class="muted" id="watchlist-count">(0)</span></h2>
+        <div class="panel-head-right">
+          <span class="muted small" id="watchlist-updated">—</span>
+          <button class="panel-toggle collapsed" id="watchlist-toggle" title="Expandir" aria-label="Expandir panel" aria-expanded="false">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6.7 8.3a1 1 0 0 1 1.4 0L12 12.17l3.9-3.87a1 1 0 1 1 1.4 1.42l-4.6 4.56a1 1 0 0 1-1.4 0L6.7 9.72a1 1 0 0 1 0-1.42Z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="collapsible collapsed" id="watchlist-box">
+        <div class="table-wrap">
+          <table id="watchlist-table">
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Último cierre</th>
+                <th>Cambio hoy</th>
+                <th>Cambio semanal</th>
+                <th>Rango diario medio</th>
+                <th>Volumen medio</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-fast-watchlist">
+      <div class="panel-head">
+        <h2>ETFs de entrada rápida <span class="muted" id="fast-watchlist-count">(0)</span></h2>
+        <div class="panel-head-right">
+          <span class="muted small" id="fast-watchlist-updated">—</span>
+          <button class="panel-toggle collapsed" id="fast-watchlist-toggle" title="Expandir" aria-label="Expandir panel" aria-expanded="false">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6.7 8.3a1 1 0 0 1 1.4 0L12 12.17l3.9-3.87a1 1 0 1 1 1.4 1.42l-4.6 4.56a1 1 0 0 1-1.4 0L6.7 9.72a1 1 0 0 1 0-1.42Z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="collapsible collapsed" id="fast-watchlist-box">
+        <p class="muted small">Segunda lista (20 tickers, sin repetir con el watchlist principal) que el bot también escanea para entradas rápidas.</p>
+        <div class="table-wrap">
+          <table id="fast-watchlist-table">
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Último cierre</th>
+                <th>Cambio hoy</th>
+                <th>Cambio semanal</th>
+                <th>Rango diario medio</th>
+                <th>Volumen medio</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-errors">
+      <div class="panel-head">
+        <h2>Errores y operaciones rechazadas <span class="muted" id="error-log-count">(0)</span></h2>
+        <div class="panel-head-right">
+          <button class="panel-toggle collapsed" id="error-log-toggle" title="Expandir" aria-label="Expandir panel" aria-expanded="false">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6.7 8.3a1 1 0 0 1 1.4 0L12 12.17l3.9-3.87a1 1 0 1 1 1.4 1.42l-4.6 4.56a1 1 0 0 1-1.4 0L6.7 9.72a1 1 0 0 1 0-1.42Z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="collapsible collapsed" id="error-log-box">
+        <div class="table-wrap">
+          <table id="error-log-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Intento</th>
+                <th>Motivo del rechazo</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="muted empty-msg" id="error-log-empty" hidden>Sin errores registrados — ninguna operación fue rechazada.</p>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-account-value">
+      <div class="panel-head">
+        <h2>Evolución del valor de la cuenta</h2>
+        <div class="panel-head-right">
+          <span class="muted small" id="last-updated">—</span>
+          <button class="panel-toggle" id="account-chart-toggle" title="Minimizar" aria-label="Minimizar panel" aria-expanded="true">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6.7 8.3a1 1 0 0 1 1.4 0L12 12.17l3.9-3.87a1 1 0 1 1 1.4 1.42l-4.6 4.56a1 1 0 0 1-1.4 0L6.7 9.72a1 1 0 0 1 0-1.42Z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="chart-box chart-box-lg" id="account-chart-box"><canvas id="chart-account-value"></canvas></div>
+    </section>
+
+    <section class="panel" id="mercado">
+      <div class="panel-head">
+        <h2>Análisis de mercado</h2>
+        <div class="panel-head-right">
+          <span class="muted small" id="market-updated">—</span>
+          <button class="panel-toggle collapsed" id="mercado-toggle" title="Expandir" aria-label="Expandir panel" aria-expanded="false">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6.7 8.3a1 1 0 0 1 1.4 0L12 12.17l3.9-3.87a1 1 0 1 1 1.4 1.42l-4.6 4.56a1 1 0 0 1-1.4 0L6.7 9.72a1 1 0 0 1 0-1.42Z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="collapsible collapsed" id="mercado-box">
+      <div class="tabs" id="market-tabs" role="tablist">
+        <button class="tab-btn" data-tab="tab-tecnico" role="tab">Técnico</button>
+        <button class="tab-btn" data-tab="tab-semanal" role="tab">Semanal</button>
+        <button class="tab-btn" data-tab="tab-conocidos" role="tab">ETFs conocidos</button>
+        <button class="tab-btn" data-tab="tab-daytrading" role="tab">Day trading</button>
+      </div>
+
+      <div class="tab-pane" id="tab-tecnico">
+        <div class="tech-header">
+          <span class="muted small">1H · 1D · 1S</span>
+          <div class="tech-controls">
+            <select id="technical-symbol-select" class="select-input">
+              <optgroup label="Índices / muy conocidos">
+                <option value="SPY">SPY — S&amp;P 500</option>
+                <option value="QQQ">QQQ — Nasdaq 100</option>
+                <option value="DIA">DIA — Dow Jones</option>
+                <option value="IWM">IWM — Russell 2000</option>
+                <option value="VOO">VOO — S&amp;P 500 (Vanguard)</option>
+                <option value="VTI">VTI — Mercado total EEUU</option>
+              </optgroup>
+              <optgroup label="Sectores / tematicos">
+                <option value="XLF">XLF — Financiero</option>
+                <option value="XLE">XLE — Energia</option>
+                <option value="XLK">XLK — Tecnologia</option>
+                <option value="SMH">SMH — Semiconductores</option>
+                <option value="ARKK">ARKK — Innovacion (ARK)</option>
+                <option value="GLD">GLD — Oro</option>
+                <option value="TLT">TLT — Bonos Tesoro 20+</option>
+              </optgroup>
+              <optgroup label="Apalancados">
+                <option value="TQQQ">TQQQ — Nasdaq x3 alcista</option>
+                <option value="SQQQ">SQQQ — Nasdaq x3 bajista</option>
+              </optgroup>
+              <option value="__custom__">Otro ticker…</option>
+            </select>
+            <input type="text" id="technical-symbol-custom" class="text-input" placeholder="Ej: AAPL" maxlength="10" hidden>
+            <button id="technical-symbol-apply" class="btn-secondary" hidden>Analizar</button>
+          </div>
+        </div>
+        <div class="tech-bias" id="tech-bias">
+          <p class="muted">Cargando…</p>
+        </div>
+        <div class="tech-grid" id="tech-grid"></div>
+        <div class="chart-box"><canvas id="chart-technical"></canvas></div>
+        <p class="muted small futures-note">* Lectura de indicadores tecnicos estandar (medias moviles, RSI, MACD) sobre datos historicos de Yahoo Finance. No es una prediccion garantizada.</p>
+      </div>
+
+      <div class="tab-pane" id="tab-semanal">
+        <div class="market-summary" id="market-summary">
+          <p class="muted">Cargando…</p>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="tab-conocidos">
+        <div class="table-wrap">
+          <table id="known-etf-table">
+            <thead>
+              <tr>
+                <th>ETF</th>
+                <th>Referencia</th>
+                <th>Cierre semana</th>
+                <th>Cambio semanal</th>
+                <th>Futuros (indicador lunes)</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="chart-box chart-box-sm"><canvas id="chart-known-etfs"></canvas></div>
+        <p class="muted small futures-note">* El indicador de futuros es orientativo (cotizacion fuera de horario de CME) y no garantiza como abrira el mercado el lunes.</p>
+      </div>
+
+      <div class="tab-pane" id="tab-daytrading">
+        <div class="table-wrap">
+          <table id="etf-table">
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Último cierre</th>
+                <th>Cambio semanal</th>
+                <th>Rango diario medio</th>
+                <th>Volumen medio</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="chart-box chart-box-sm"><canvas id="chart-etf-volume"></canvas></div>
+      </div>
+      </div>
+    </section>
+   </div>
+
+    <section class="panel" id="historial" hidden>
+      <div class="panel-head">
+        <h2>Historial de operaciones</h2>
+        <a href="#resumen" data-target="resumen" class="link">&larr; Volver al resumen</a>
+      </div>
+      <div class="table-wrap">
+        <table id="history-table">
+          <thead>
+            <tr>
+              <th>Contratos</th>
+              <th>Vencimiento</th>
+              <th>Cantidad</th>
+              <th>Valor</th>
+              <th>Ganancia/Pérdida ($)</th>
+              <th>Precio entrada</th>
+              <th>Precio salida</th>
+              <th>Abierta</th>
+              <th>Cerrada</th>
+              <th>Razón de entrada</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p class="muted empty-msg" id="history-empty" hidden>Sin operaciones cerradas registradas todavía.</p>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal-overlay" id="settings-modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Configuración de operativa</h3>
+        <button class="modal-close" id="settings-close" aria-label="Cerrar">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="risk-slider-head">
+          <label for="setting-risk-pct" style="margin-top:0;">Riesgo por operación (% de tu cuenta)</label>
+          <span class="risk-level-tag" id="risk-level-tag">—</span>
+        </div>
+        <div class="risk-slider-value" id="risk-pct-display">2.0%</div>
+        <input type="range" class="risk-slider" id="setting-risk-pct" min="0.5" max="10" step="0.5" value="2">
+        <div class="risk-slider-scale"><span>0.5%</span><span>Recomendado 2%</span><span>10%</span></div>
+        <div class="risk-amount-line">
+          <span>Monto en riesgo por operación</span>
+          <strong id="risk-amount-display">—</strong>
+        </div>
+        <p class="muted small">La cantidad de contratos se calcula sola: nunca se arriesga más de este % del valor total de tu cuenta en una sola operación (además del límite de cash disponible).</p>
+
+        <label for="setting-max-trades">Operaciones máximas por día</label>
+        <input type="number" id="setting-max-trades" min="1" step="1" value="3">
+
+        <label for="setting-watchlist">Watchlist (tickers separados por coma)</label>
+        <input type="text" id="setting-watchlist" class="text-input" style="width:100%; text-transform:uppercase;" value="SPY,QQQ,IWM">
+
+        <label for="setting-max-daily-loss">Límite de pérdida diaria (%) — apaga el bot solo si se supera</label>
+        <input type="number" id="setting-max-daily-loss" min="0.5" step="0.5" value="8">
+        <p class="muted small">Circuit breaker: si la pérdida del día (realizada + no realizada) supera este %, el bot se apaga automáticamente y no vuelve a abrir posiciones hasta que lo enciendas vos a mano. No cierra las posiciones que ya estén abiertas.</p>
+
+        <div class="settings-counter" id="settings-counter">Operaciones hoy: — / —</div>
+        <p class="muted small">Las ventas de cierre no cuentan para el límite — una vez abierta una posición, siempre se puede cerrar.</p>
+        <p class="settings-error" id="settings-error" hidden></p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="settings-save">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="real-money-modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Dinero real</h3>
+        <button class="modal-close" id="real-money-close" aria-label="Cerrar">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="real-money-modal-lock">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="var(--amber)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </div>
+        <p style="margin-top:0.9rem;">Esta función todavía no está habilitada. Cuando esté lista, vas a poder conectar tu propia cuenta de corretaje (por ejemplo, Robinhood) para que el bot opere con capital real — siempre bajo tu propio nombre, tu propio capital y tu propio riesgo, nunca gestionado por un tercero.</p>
+        <p class="muted small" style="margin-top:0.7rem;">El administrador todavía no habilitó el acceso a esta función. Vas a ver un aviso en el panel cuando esté disponible.</p>
+
+        <a href="https://claude.ai/code/artifact/4cf0e6bd-1c1e-4d76-8bb0-777b8c56bdfc" target="_blank" class="btn-secondary" style="display:block; text-align:center; text-decoration:none; margin-top:1rem;">Ver la guía paso a paso</a>
+
+        <div class="real-money-divider"></div>
+
+        <p class="small" style="font-weight:600; margin-bottom:0.3rem;">¿Ya conectaste tu Robinhood?</p>
+        <p class="muted small">Si ya seguiste la guía y autorizaste tu cuenta desde claude.ai, marcalo acá para que quede registrado — esto NO activa ninguna operación real, solo le avisa al administrador que estás listo para cuando habilite la función.</p>
+
+        <div id="robinhood-status-connected" {% if not robinhood_connected %}hidden{% endif %}>
+          <div class="robinhood-status-pill">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+            Marcado como conectado
+          </div>
+          <button class="btn-reject" id="robinhood-unmark-btn" type="button" style="margin-top:0.6rem;">Desmarcar</button>
+        </div>
+        <div id="robinhood-status-pending" {% if robinhood_connected %}hidden{% endif %}>
+          <button class="btn-secondary" id="robinhood-mark-btn" type="button" style="width:100%; margin-top:0.4rem;">Ya conecté mi Robinhood</button>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="real-money-ok">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

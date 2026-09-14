@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Activar cuenta — Bot Familiar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="icon" href="{{ url_for('static', filename='img/logo.ico') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="theme-color" content="#0b0d12">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/icon-192.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <div class="login-mark">FAM</div>
+    <h1>¡Tu cuenta fue aprobada!</h1>
+    <p class="muted small">El administrador aprobó tu acceso. Ingresá el código de 6 dígitos que te llegó.</p>
+    {% if error %}
+      <div class="alert">{{ error }}</div>
+    {% endif %}
+    {% if success %}
+      <div class="alert" style="border-color:var(--green);color:var(--green);">Cuenta activada. Ya podés iniciar sesión.</div>
+      <p class="muted small" style="text-align:center;"><a href="{{ url_for('login') }}">Iniciar sesión</a></p>
+    {% else %}
+    <form method="post" action="{{ url_for('activate') }}">
+      <label for="username">Usuario</label>
+      <input type="text" id="username" name="username" value="{{ username or '' }}" autocomplete="username" required autofocus>
+
+      <label for="code">Código de 6 dígitos</label>
+      <input type="text" id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required>
+
+      <button type="submit">Confirmar código</button>
+    </form>
+    <p class="muted small" style="text-align:center;margin-top:1rem;">El código vence 48h después de la aprobación.</p>
+    {% endif %}
+  </div>
+</body>
+</html>
