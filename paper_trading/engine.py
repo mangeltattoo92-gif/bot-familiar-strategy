@@ -648,6 +648,21 @@ def _ensure_settings_table(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE settings ADD COLUMN max_daily_loss_pct REAL NOT NULL DEFAULT 8.0")
     if "risk_pct_per_trade" not in cols:
         conn.execute("ALTER TABLE settings ADD COLUMN risk_pct_per_trade REAL NOT NULL DEFAULT 2.0")
+    if "sizing_mode" not in cols:
+        # 2026-09-14, a pedido del usuario: modo de dimensionamiento
+        # elegible por cuenta -- 'auto' (% de riesgo sobre el valor de
+        # la cuenta) o 'manual' (cantidad FIJA de contratos, reactivando
+        # el uso original de contracts_per_trade -- ese campo quedo sin
+        # uso real cuando se agrego risk_pct_per_trade el 2026-09-13,
+        # ver family_sizing.py). DEFAULT 'manual' -- a pedido EXPLICITO
+        # del usuario el mismo dia ("eliminalo de la faz de la tierra"
+        # sobre el modo automatico): cualquier cuenta NUEVA (familiar
+        # recien registrado y activado) tiene que arrancar en manual sin
+        # que nadie tenga que abrir Configuracion a mano. El selector de
+        # modo automatico ya se saco de la pantalla; esto cierra el
+        # ultimo hueco (una cuenta que nunca guarda settings hubiera
+        # quedado en 'auto' igual, por el default viejo de la columna).
+        conn.execute("ALTER TABLE settings ADD COLUMN sizing_mode TEXT NOT NULL DEFAULT 'manual'")
     row = conn.execute("SELECT 1 FROM settings WHERE id = 1").fetchone()
     if row is None:
         conn.execute(
@@ -669,7 +684,10 @@ def _settings_row_to_dict(row: sqlite3.Row) -> dict:
 
 
 def get_settings(db_path: Path = DEFAULT_DB_PATH) -> dict:
-    """Parametros de operativa: contratos por operacion, limite diario de
+    """Parametros de operativa: sizing_mode ('auto' = contracts_per_trade
+    se ignora y la cantidad sale de risk_pct_per_trade; 'manual' =
+    contracts_per_trade es la cantidad FIJA a comprar, risk_pct_per_trade
+    se ignora -- ver family_sizing.compute_quantity()), limite diario de
     operaciones, watchlist (lista principal de tickers a vigilar/escanear),
     fast_watchlist (segunda lista para entradas rapidas, sin solaparse con
     la principal), bot_enabled (interruptor maestro: si esta apagado, no
@@ -694,6 +712,7 @@ def update_settings(
     bot_enabled: bool | None = None,
     max_daily_loss_pct: float | None = None,
     risk_pct_per_trade: float | None = None,
+    sizing_mode: str | None = None,
     db_path: Path = DEFAULT_DB_PATH,
 ) -> dict:
     conn = _connect(db_path)
@@ -714,6 +733,9 @@ def update_settings(
         )
         if not (0.5 <= new_risk_pct_per_trade <= 10.0):
             raise PaperTradingError("risk_pct_per_trade debe estar entre 0.5 y 10.0 (% del valor de la cuenta)")
+        new_sizing_mode = current.get("sizing_mode", "auto") if sizing_mode is None else sizing_mode
+        if new_sizing_mode not in ("auto", "manual"):
+            raise PaperTradingError("sizing_mode debe ser 'auto' o 'manual'")
 
         def _normalize_list(value, allow_empty):
             if isinstance(value, str):
@@ -732,9 +754,9 @@ def update_settings(
         conn.execute(
             "UPDATE settings SET contracts_per_trade = ?, max_trades_per_day = ?, watchlist = ?, "
             "fast_watchlist = ?, bot_enabled = ?, max_daily_loss_pct = ?, risk_pct_per_trade = ?, "
-            "updated_at = ? WHERE id = 1",
+            "sizing_mode = ?, updated_at = ? WHERE id = 1",
             (new_contracts, new_max_trades, new_watchlist, new_fast_watchlist, new_bot_enabled,
-             new_max_daily_loss_pct, new_risk_pct_per_trade, _now()),
+             new_max_daily_loss_pct, new_risk_pct_per_trade, new_sizing_mode, _now()),
         )
         conn.commit()
         return _settings_row_to_dict(conn.execute("SELECT * FROM settings WHERE id = 1").fetchone())
