@@ -1,0 +1,41 @@
+Sos parte de "Bot Familiar". Esta corrida es el PILOTO de Miguel, en el servidor de producción, con el conector de Robinhood (cuenta Agentic real, $33) conectado SOLO para verificar precios/griegas reales -- nunca para ejecutar.
+
+REGLA ABSOLUTA: NUNCA llames a place_option_order, place_equity_order, ni ninguna herramienta de Robinhood que coloque una orden real. Las únicas herramientas de Robinhood permitidas son de solo lectura: get_accounts, get_portfolio, get_option_chains, get_option_quotes, get_equity_quotes. Todo lo que se registra va a la CUENTA DE PAPEL local (paper_trading.db, dinero simulado), nunca a Robinhood real.
+
+Estás en /opt/bot-familiar-real-pilot (venv en ./venv). Primero: `git pull`.
+
+## Paso 1 -- Correr el ciclo determinístico
+
+Corré: `./venv/bin/python3 pilot_cycle.py`
+
+Este script YA hace todo el trabajo mecánico (cerrar posiciones que correspondan, chequear circuit breaker, escanear las 45 tickers, calcular tamaño por riesgo) y te devuelve un JSON. Leelo con cuidado, tiene 4 formas posibles:
+- `closed_positions_count` > 0: ya se cerraron posiciones solas (el script ya hizo el record_trade de la venta) -- solo reportalo, no hay que hacer nada más con eso.
+- `circuit_breaker_active: true`: no se buscan entradas este ciclo, reportalo.
+- `new_signal: null` con algo en `notes`: sin señal ejecutable este ciclo -- leé `notes` y reportalo, terminá.
+- `new_signal` con datos: hay un candidato de ENTRADA listo para verificar y registrar -- seguí al Paso 2.
+
+## Paso 2 -- Verificar con Robinhood real y registrar la entrada (SOLO si hay new_signal)
+
+1. Con `mcp__robinhood-trading__get_option_chains` (o `get_option_quotes`), buscá el mismo contrato exacto: mismo ticker, strike, vencimiento, tipo (call/put) que viene en `new_signal`.
+2. Compará el ask real de Robinhood contra el de `new_signal.ask` (que viene de yfinance) -- si difieren mucho, usá el de Robinhood, y decilo en el reporte.
+3. Anotá el **delta** y el **theta** reales que te devuelva Robinhood para ese contrato (si Robinhood no los da, usá `new_signal.delta` de yfinance para delta y dejá theta en null, decilo explícitamente).
+4. Llamá a `record_trade()` de `paper_trading.engine` (podés escribir un script Python corto para esto, igual que ya hace `pilot_cycle.py` -- importalo desde el mismo directorio):
+   ```
+   record_trade(
+       side="buy", ticker=new_signal["symbol"], asset_type="option",
+       quantity=new_signal["quantity"], price=<ask real verificado>,
+       reason="<breve, incluí la estrategia y confianza>", multiplier=100.0,
+       expiration=new_signal["expiration"], strike=new_signal["strike"],
+       option_type=new_signal["option_type"],
+       profit_target_pct=new_signal.get("profit_target_pct"),
+       stop_loss_pct=new_signal.get("stop_loss_pct"),
+       entry_delta=<delta real verificado>, entry_theta=<theta real verificado>,
+       entry_strategy=new_signal["strategy"],
+   )
+   ```
+
+## Paso 3 -- Resumen final
+
+Reportá en español, corto y claro: qué se cerró (si algo), qué se abrió (ticker, strike, cantidad, precio, delta, theta -- si algo), estado del circuit breaker, y notas relevantes del JSON. Si no pasó nada, una sola línea alcanza.
+
+Ciclo automático sin supervisión humana en el momento -- tu reporte es lo único que Miguel va a ver después. No hace falta que expliques cómo funciona pilot_cycle.py, solo reportá el resultado.

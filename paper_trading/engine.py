@@ -72,7 +72,8 @@ def init_db(initial_balance: float, db_path: Path = DEFAULT_DB_PATH, reset: bool
                 opened_at TEXT,
                 profit_target_pct REAL,
                 stop_loss_pct REAL,
-                entry_delta REAL
+                entry_delta REAL,
+                entry_theta REAL
             );
 
             CREATE TABLE IF NOT EXISTS trades (
@@ -90,6 +91,7 @@ def init_db(initial_balance: float, db_path: Path = DEFAULT_DB_PATH, reset: bool
                 reason TEXT,
                 option_details TEXT,
                 entry_delta REAL,
+                entry_theta REAL,
                 entry_signal TEXT,
                 entry_volatility_strength TEXT,
                 entry_band_width_pct REAL,
@@ -150,6 +152,8 @@ def _ensure_positions_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE positions ADD COLUMN stop_loss_pct REAL")
     if "entry_delta" not in cols:
         conn.execute("ALTER TABLE positions ADD COLUMN entry_delta REAL")
+    if "entry_theta" not in cols:
+        conn.execute("ALTER TABLE positions ADD COLUMN entry_theta REAL")
 
 
 def _ensure_trades_columns(conn: sqlite3.Connection) -> None:
@@ -158,6 +162,8 @@ def _ensure_trades_columns(conn: sqlite3.Connection) -> None:
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(trades)")}
     if "entry_delta" not in cols:
         conn.execute("ALTER TABLE trades ADD COLUMN entry_delta REAL")
+    if "entry_theta" not in cols:
+        conn.execute("ALTER TABLE trades ADD COLUMN entry_theta REAL")
     if "entry_signal" not in cols:
         conn.execute("ALTER TABLE trades ADD COLUMN entry_signal TEXT")
     if "entry_volatility_strength" not in cols:
@@ -189,6 +195,7 @@ def _record_trade_impl(
     profit_target_pct: float | None = None,
     stop_loss_pct: float | None = None,
     entry_delta: float | None = None,
+    entry_theta: float | None = None,
     entry_signal: str | None = None,
     entry_volatility_strength: str | None = None,
     entry_band_width_pct: float | None = None,
@@ -212,6 +219,11 @@ def _record_trade_impl(
     condiciones dieron mejores resultados (ver trade_journal.py).
     entry_delta: delta del contrato de opcion en el momento de la compra
     (ej. 0.52 para un call, -0.47 para un put). Solo tiene sentido en compras.
+    entry_theta: theta del contrato en el momento de la compra (decaimiento
+    diario de la prima, siempre negativo para el comprador). Solo tiene
+    sentido en compras -- se guarda para poder ver despues cuanto pesaba
+    el paso del tiempo en cada operacion, no se usa hoy para filtrar
+    contratos (a diferencia del delta).
     entry_strategy: cual de las 3 estrategias genero la señal
     ('squeeze_breakout' | 'gap_fade_apertura' | 'giro_sma20') -- para poder
     comparar el rendimiento de cada estrategia por separado (ver
@@ -279,10 +291,10 @@ def _record_trade_impl(
             if pos is None:
                 conn.execute(
                     "INSERT INTO positions (key, ticker, asset_type, option_details, quantity, avg_cost, "
-                    "multiplier, opened_at, profit_target_pct, stop_loss_pct, entry_delta) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "multiplier, opened_at, profit_target_pct, stop_loss_pct, entry_delta, entry_theta) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (key, ticker.upper(), asset_type, option_details, quantity, price, multiplier,
-                     _now(), profit_target_pct, stop_loss_pct, entry_delta),
+                     _now(), profit_target_pct, stop_loss_pct, entry_delta, entry_theta),
                 )
             else:
                 old_qty = pos["quantity"]
@@ -331,6 +343,7 @@ def _record_trade_impl(
         now = _now()
         is_buy = side == "buy"
         trade_entry_delta = entry_delta if is_buy else None
+        trade_entry_theta = entry_theta if is_buy else None
         trade_entry_signal = entry_signal if is_buy else None
         trade_entry_volatility_strength = entry_volatility_strength if is_buy else None
         trade_entry_band_width_pct = entry_band_width_pct if is_buy else None
@@ -340,13 +353,13 @@ def _record_trade_impl(
         trade_entry_strategy = entry_strategy if is_buy else None
         conn.execute(
             "INSERT INTO trades (timestamp, ticker, asset_type, side, quantity, price, multiplier, "
-            "cash_effect, cash_after, realized_pnl_delta, reason, option_details, entry_delta, "
+            "cash_effect, cash_after, realized_pnl_delta, reason, option_details, entry_delta, entry_theta, "
             "entry_signal, entry_volatility_strength, entry_band_width_pct, "
             "entry_band_width_percentile, entry_volume_ratio, entry_consecutive_squeeze_bars, entry_strategy) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (now, ticker.upper(), asset_type, side, quantity, price, multiplier,
              cash_effect, new_cash_balance, realized_delta, reason.strip(), option_details, trade_entry_delta,
-             trade_entry_signal, trade_entry_volatility_strength, trade_entry_band_width_pct,
+             trade_entry_theta, trade_entry_signal, trade_entry_volatility_strength, trade_entry_band_width_pct,
              trade_entry_band_width_percentile, trade_entry_volume_ratio, trade_entry_consecutive_squeeze_bars,
              trade_entry_strategy),
         )
@@ -369,6 +382,7 @@ def _record_trade_impl(
             "realized_pnl_delta": realized_delta,
             "reason": reason.strip(),
             "entry_delta": trade_entry_delta,
+            "entry_theta": trade_entry_theta,
         }
     finally:
         conn.close()
@@ -511,6 +525,7 @@ def get_status(current_prices: dict[str, float] | None = None, db_path: Path = D
                 "profit_target_pct": p["profit_target_pct"],
                 "stop_loss_pct": p["stop_loss_pct"],
                 "entry_delta": p["entry_delta"],
+                "entry_theta": p["entry_theta"],
             }
             if p["option_details"]:
                 entry["option_details"] = json.loads(p["option_details"])
@@ -739,6 +754,30 @@ def get_daily_realized_pnl(db_path: Path = DEFAULT_DB_PATH) -> float:
         today = datetime.now(timezone.utc).date().isoformat()
         row = conn.execute(
             "SELECT COALESCE(SUM(realized_pnl_delta), 0) AS total FROM trades WHERE substr(timestamp, 1, 10) = ?",
+            (today,),
+        ).fetchone()
+        return float(row["total"]) if row else 0.0
+    finally:
+        conn.close()
+
+
+def get_unsettled_cash_today(db_path: Path = DEFAULT_DB_PATH) -> float:
+    """Suma de cash_effect de las VENTAS (side='sell') de HOY (fecha UTC,
+    mismo criterio que get_trades_count_today) -- plata que el cash_balance
+    ya contabiliza pero que un broker real (ej. Robinhood) todavia no deja
+    usar como buying power hasta la liquidacion (T+1: recien disponible en
+    la siguiente sesion de bolsa). No usado por defecto en get_status ni en
+    la seleccion de contratos de las cuentas familiares normales (ahi el
+    cash simulado siempre estuvo disponible al instante, por diseno) --
+    existe para que quien necesite simular buying power real de un broker
+    (ej. el piloto de dinero real) pueda restarlo del cash_balance antes de
+    dimensionar una entrada nueva el mismo dia."""
+    conn = _connect(db_path)
+    try:
+        today = datetime.now(timezone.utc).date().isoformat()
+        row = conn.execute(
+            "SELECT COALESCE(SUM(cash_effect), 0) AS total FROM trades "
+            "WHERE side = 'sell' AND substr(timestamp, 1, 10) = ?",
             (today,),
         ).fetchone()
         return float(row["total"]) if row else 0.0
