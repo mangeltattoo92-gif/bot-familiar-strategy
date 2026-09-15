@@ -29,15 +29,26 @@ for script in run_pilot.sh pilot_health_check.sh run_proximity.sh pilot_cycle.py
 done
 
 # 1. El log de entradas creciendo? SOLO durante horario de mercado
-#    (13-19 UTC, lun-vie) -- fuera de ese horario el cron ni corre, asi
-#    que no actualizarse ahi es normal, no un problema (bug real
-#    encontrado en la primera version de este script: marcaba "problema"
-#    aunque el mercado estuviera cerrado).
+#    (13:30-19:59 UTC, lun-vie -- apertura real 13:30 UTC / 9:30am ET,
+#    no las 13:00 en punto) -- fuera de ese horario el cron ni corre,
+#    asi que no actualizarse ahi es normal, no un problema. Bug real
+#    encontrado 2026-09-15: la version anterior arrancaba la ventana en
+#    HOUR_UTC>=13 (o sea, desde las 13:00 en punto) -- 30 min ANTES de
+#    la apertura real y hasta 2 min antes del primer tick del cron del
+#    piloto (13:02), lo que generaba una falsa alarma "no se actualiza
+#    hace 1022 min" cada mañana justo al filo de las 13:00, comparando
+#    contra el ultimo log de la sesion anterior. Ahora se compara
+#    tambien el minuto, no solo la hora.
 HOUR_UTC=$(date -u +%H | sed 's/^0//')
+MINUTE_UTC=$(date -u +%M | sed 's/^0//')
 DOW_UTC=$(date -u +%u)  # 1=lunes .. 7=domingo
 MARKET_WINDOW=false
-if [ "$DOW_UTC" -ge 1 ] && [ "$DOW_UTC" -le 5 ] && [ "$HOUR_UTC" -ge 13 ] && [ "$HOUR_UTC" -le 19 ]; then
-    MARKET_WINDOW=true
+if [ "$DOW_UTC" -ge 1 ] && [ "$DOW_UTC" -le 5 ]; then
+    if [ "$HOUR_UTC" -gt 13 ] && [ "$HOUR_UTC" -le 19 ]; then
+        MARKET_WINDOW=true
+    elif [ "$HOUR_UTC" -eq 13 ] && [ "${MINUTE_UTC:-0}" -ge 30 ]; then
+        MARKET_WINDOW=true
+    fi
 fi
 
 if [ "$MARKET_WINDOW" = true ]; then
