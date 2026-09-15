@@ -79,7 +79,7 @@ MARKET_CLOSE_TIME = dtime(16, 0)
 # hoy en trading-bot/family_sim.py con 10 cuentas simuladas, en vez de
 # agregar user_id a las tablas compartidas de paper_trading/engine.py).
 USERS_DATA_DIR = ROOT / "data" / "users"
-DEFAULT_INITIAL_BALANCE = 10000.0  # placeholder hasta que cada quien pueda fijar su propio capital
+DEFAULT_INITIAL_BALANCE = 10000.0  # 2026-09-15: monto generico fijo para toda cuenta nueva, a pedido del usuario
 
 
 def _user_db_path() -> Path:
@@ -287,28 +287,23 @@ def signup():
         email = request.form.get("email", "").strip()
         password = request.form.get("password", "")
         terms_accepted = request.form.get("terms_accepted") == "on"
-        try:
-            initial_capital = float(request.form.get("initial_capital", ""))
-        except (TypeError, ValueError):
-            initial_capital = None
         if not username or not email or not password:
             error = "Usuario, correo y contrasena son obligatorios."
         elif not terms_accepted:
             error = "Tenes que aceptar los Terminos y Condiciones y el Aviso de Riesgo para crear la cuenta."
-        elif initial_capital is None or initial_capital < 100:
-            error = "El capital inicial debe ser un numero de al menos $100."
         else:
             try:
                 register_user(username, email, password, terms_accepted=True)
-                # Cuenta de trading creada YA con el capital real elegido
-                # (2026-09-10, a pedido del usuario -- antes todos
-                # arrancaban con el mismo $10,000 placeholder, se creaba
-                # recien en el primer acceso). No hace falta esperar a
+                # Cuenta de trading creada YA con capital de papel fijo
+                # (2026-09-15, a pedido del usuario -- revierte el capital
+                # inicial elegido por cada quien del 2026-09-10: ahora todos
+                # arrancan con el mismo monto generico DEFAULT_INITIAL_BALANCE,
+                # sin pedirlo en el formulario). No hace falta esperar a
                 # que se active -- la cuenta de trading es independiente
                 # del estado de aprobacion, solo el LOGIN esta bloqueado
                 # hasta 'active'.
                 db_path = USERS_DATA_DIR / username / "paper_trading.db"
-                init_db(initial_balance=initial_capital, db_path=db_path)
+                init_db(initial_balance=DEFAULT_INITIAL_BALANCE, db_path=db_path)
                 return render_template(
                     "signup.html",
                     success="Cuenta creada -- queda pendiente hasta que el administrador la apruebe. "
