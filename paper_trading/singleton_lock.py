@@ -23,6 +23,7 @@ validar a mano). Portado a POSIX el 2026-09-10 para el servidor Hetzner
 
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -77,3 +78,41 @@ def acquire_single_instance_lock(name: str) -> None:
     f.write(str(os.getpid()))
     f.flush()
     _held_locks.append(f)  # nunca se cierra explicitamente -- vive hasta que el proceso termina
+
+
+@contextmanager
+def exits_critical_section():
+    """Lock BLOQUEANTE (espera en vez de salir) para la seccion que revisa
+    y cierra posiciones abiertas -- distinto de acquire_single_instance_lock,
+    que es para que un proceso detecte una copia de SI MISMO y se cierre.
+    Aca en cambio hay dos procesos DISTINTOS que necesitan turnarse sobre
+    las mismas cuentas: el ciclo normal de multi_user_entry.py (cada 120s,
+    exits + entradas) y exit_watch.py (2026-09-15, motor liviano solo de
+    salidas cada 30s, a pedido del usuario para reaccionar mas rapido al
+    stop-loss). Sin este lock, ambos podrian leer la misma posicion abierta
+    a la vez y las dos intentar cerrarla -- la ventana entre 'leer posicion'
+    y 'grabar el cierre' en run_exits_for_account() no es atomica por si
+    sola. Se libera solo (SO) si el proceso muere a mitad de camino."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = DATA_DIR / "exits_critical_section.lock"
+    f = open(lock_path, "a+")
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)  # bloqueante
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # bloqueante
+        yield
+    finally:
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        finally:
+            f.close()

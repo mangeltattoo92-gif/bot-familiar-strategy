@@ -59,7 +59,7 @@ from paper_trading.engine import (
 from daily_guide import load_guide as load_daily_guide
 from paper_trading.family_sizing import estimate_affordable_symbols, select_affordable_contract
 from paper_trading.option_selection import MAX_SPREAD_PCT
-from paper_trading.singleton_lock import acquire_single_instance_lock
+from paper_trading.singleton_lock import acquire_single_instance_lock, exits_critical_section
 from webapp import market_data
 from webapp.auth import STATUS_ACTIVE, list_all_users
 
@@ -394,8 +394,9 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
 def run_cycle() -> None:
     accounts = active_accounts()
     closed_total = 0
-    for username, db_path in accounts:
-        closed_total += run_exits_for_account(username, db_path)
+    with exits_critical_section():
+        for username, db_path in accounts:
+            closed_total += run_exits_for_account(username, db_path)
     run_entry_cycle(accounts)
     if closed_total:
         _log(f"Ciclo completo -- {closed_total} posicion(es) cerradas en total esta vuelta.")
