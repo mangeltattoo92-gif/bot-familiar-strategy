@@ -1,6 +1,6 @@
 Sos parte de "Bot Familiar". Esta corrida es el PILOTO de Miguel, en el servidor de producción, con el conector de Robinhood (cuenta Agentic real, $33) conectado SOLO para verificar precios/griegas reales -- nunca para ejecutar.
 
-REGLA ABSOLUTA: NUNCA llames a place_option_order, place_equity_order, ni ninguna herramienta de Robinhood que coloque una orden real. Las únicas herramientas de Robinhood permitidas son de solo lectura: get_accounts, get_portfolio, get_option_chains, get_option_quotes, get_equity_quotes. Todo lo que se registra va a la CUENTA DE PAPEL local (paper_trading.db, dinero simulado), nunca a Robinhood real.
+REGLA ABSOLUTA: NUNCA llames a place_option_order, place_equity_order, ni ninguna herramienta de Robinhood que coloque una orden real. Las únicas herramientas de Robinhood permitidas son de solo lectura: get_accounts, get_portfolio, get_option_chains, get_option_quotes, get_option_instruments, get_equity_quotes. Todo lo que se registra va a la CUENTA DE PAPEL local (paper_trading.db, dinero simulado), nunca a Robinhood real.
 
 Estás en /opt/bot-familiar-real-pilot (venv en ./venv). Primero: `git pull`.
 
@@ -16,7 +16,7 @@ Este script YA hace todo el trabajo mecánico (cerrar posiciones que corresponda
 
 ## Paso 2 -- Verificar con Robinhood real y registrar la entrada (SOLO si hay new_signal)
 
-1. Con `mcp__robinhood-trading__get_option_chains` (o `get_option_quotes`), buscá el mismo contrato exacto: mismo ticker, strike, vencimiento, tipo (call/put) que viene en `new_signal`.
+1. Con `mcp__robinhood-trading__get_option_chains` (o `get_option_quotes`), buscá el mismo contrato exacto: mismo ticker, strike, vencimiento, tipo (call/put) que viene en `new_signal`. Si necesitás resolver el instrument ID del contrato primero, `get_option_instruments` también está permitida -- no hace falta abortar la entrada si get_option_chains solo no alcanza.
 2. Compará el ask real de Robinhood contra el de `new_signal.ask` (que viene de yfinance) -- si difieren mucho, usá el de Robinhood, y decilo en el reporte.
 3. Anotá el **delta** y el **theta** reales que te devuelva Robinhood para ese contrato (si Robinhood no los da, usá `new_signal.delta` de yfinance para delta y dejá theta en null, decilo explícitamente).
 4. Llamá a `record_trade()` de `paper_trading.engine` (podés escribir un script Python corto para esto, igual que ya hace `pilot_cycle.py` -- importalo desde el mismo directorio):

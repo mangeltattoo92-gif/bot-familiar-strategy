@@ -22,7 +22,7 @@ LOG_FILE="/opt/bot-familiar-real-pilot/pilot.log"
 echo "=== $TIMESTAMP ===" >> "$LOG_FILE"
 
 claude -p "$(cat pilot_prompt.txt)" \
-  --allowedTools "Bash Read Write Edit Glob Grep mcp__robinhood-trading__get_accounts mcp__robinhood-trading__get_portfolio mcp__robinhood-trading__get_option_chains mcp__robinhood-trading__get_option_quotes mcp__robinhood-trading__get_equity_quotes" \
+  --allowedTools "Bash Read Write Edit Glob Grep mcp__robinhood-trading__get_accounts mcp__robinhood-trading__get_portfolio mcp__robinhood-trading__get_option_chains mcp__robinhood-trading__get_option_quotes mcp__robinhood-trading__get_option_instruments mcp__robinhood-trading__get_equity_quotes" \
   --permission-prompts none \
   --output-format text \
   >> "$LOG_FILE" 2>&1
