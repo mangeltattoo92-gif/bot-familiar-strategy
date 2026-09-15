@@ -58,6 +58,7 @@ from paper_trading.engine import (
     update_settings,
 )
 from daily_guide import load_guide as load_daily_guide
+from daily_market_bias import load_bias as load_daily_market_bias
 from paper_trading.family_sizing import estimate_affordable_symbols, select_affordable_contract
 from paper_trading.option_selection import MAX_SPREAD_PCT
 from paper_trading.singleton_lock import acquire_single_instance_lock, exits_critical_section
@@ -203,6 +204,7 @@ def run_exits_for_account(username: str, db_path: Path) -> int:
     closed = 0
     current_prices: dict[str, float] = {}
     peak_state = _load_peak_state()
+    daily_bias = load_daily_market_bias()
     for p in status["positions"]:
         price = _current_price(p)
         if price is None:
@@ -229,7 +231,16 @@ def run_exits_for_account(username: str, db_path: Path) -> int:
             except Exception:
                 trend_1h = None
             wanted = "bajista" if p["option_details"]["option_type"] == "put" else "alcista"
-            hourly_aligned = trend_1h == wanted
+            # 2026-09-15, a pedido del usuario ("sepas los riesgos... a la
+            # hora de... salir"): el respaldo ahora exige que TANTO la
+            # tendencia de 1h COMO el sesgo diario (daily_market_bias.py)
+            # vayan a favor -- si cualquiera de los dos esta en contra, la
+            # posicion ya no se considera "respaldada", y la regla de
+            # asegurar ganancia temprana (EARLY_LOCK_WITHOUT_1H_SUPPORT_PCT)
+            # reacciona mas rapido.
+            daily_bias_ticker = daily_bias.get(p["ticker"])
+            daily_aligned = daily_bias_ticker in (None, "lateral", wanted)
+            hourly_aligned = (trend_1h == wanted) and daily_aligned
 
         # Rastreo de pico de ganancia (2026-09-15) -- ver PEAK_PROFIT_LOCK_PCT
         # en bollinger_strategy.py. Estado compartido entre este ciclo (cada
@@ -346,6 +357,13 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
     # evidencia real de que un ticker rinde mal.
     daily_guide = load_daily_guide()
 
+    # Sesgo diario de mercado (2026-09-15, a pedido del usuario -- ver
+    # daily_market_bias.py): alcista/bajista/lateral por ticker segun el
+    # ultimo cierre diario confirmado. {} si el cron de la mañana
+    # todavia no corrio -- ningun ticker queda bloqueado por falta de
+    # datos, igual que daily_guide.
+    daily_bias = load_daily_market_bias()
+
     for username, db_path in accounts:
         settings = get_settings(db_path)
         if not settings["bot_enabled"]:
@@ -390,6 +408,17 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
             ticker_verdict = daily_guide.get(r["symbol"], {}).get("verdict")
             if ticker_verdict == "cuidado" and r["confidence"] != "alta":
                 continue  # historial real de 60 dias malo en este ticker -- exige confianza alta
+            # 2026-09-15, a pedido del usuario ("tener en cuenta si es
+            # alcista o bajista... para cuando vayas a operar sepas los
+            # riesgos a la hora de entrar"): si la señal va CONTRA el
+            # sesgo diario del ticker (CALL en uno bajista, PUT en uno
+            # alcista), es una entrada de mas riesgo -- se exige
+            # confianza alta, mismo mecanismo que giro_sma20 y "cuidado".
+            # Ver daily_market_bias.py.
+            ticker_bias = daily_bias.get(r["symbol"])
+            wanted_bias = "alcista" if r["signal"] == "buy_call" else "bajista"
+            if ticker_bias not in (None, "lateral", wanted_bias) and r["confidence"] != "alta":
+                continue  # señal contra el sesgo diario del ticker -- exige confianza alta
             if r["symbol"] not in my_affordable:
                 continue  # pre-filtro por poder de compra -- ver estimate_affordable_symbols
             if r["symbol"] in open_tickers or r["symbol"] in used_tickers:

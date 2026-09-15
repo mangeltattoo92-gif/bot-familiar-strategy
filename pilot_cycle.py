@@ -22,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from daily_market_bias import load_bias as load_daily_market_bias
 from multi_user_entry import run_exits_for_account
 from paper_trading.bollinger_strategy import scan_all_signals, too_close_to_open_new_position
 from paper_trading.engine import (
@@ -67,17 +68,23 @@ def main():
 
     all_symbols = list(dict.fromkeys(settings["watchlist"] + settings["fast_watchlist"]))
     open_tickers = {p["ticker"] for p in status["positions"]}
+    daily_bias = load_daily_market_bias()
     signals = []
     for symbol in all_symbols:
         try:
             for r in scan_all_signals(symbol):
                 if r["signal"] == "none" or r["confidence"] == "baja" or symbol in open_tickers:
                     continue
-                # 2026-09-15, mismo filtro que multi_user_entry.py -- ver la
-                # nota larga ahi: giro_sma20 salio 0/2 hoy en confianza media,
-                # sin el respaldo de volumen/compresion que si exige
-                # squeeze_breakout por diseño.
+                # 2026-09-15, mismos filtros que multi_user_entry.py -- ver
+                # las notas largas ahi para cada uno.
                 if r["strategy"] == "giro_sma20" and r["confidence"] != "alta":
+                    continue
+                if (r["strategy"] in ("squeeze_breakout", "squeeze_breakout_temprano")
+                        and r.get("volatility_strength") != "extrema"):
+                    continue
+                ticker_bias = daily_bias.get(symbol)
+                wanted_bias = "alcista" if r["signal"] == "buy_call" else "bajista"
+                if ticker_bias not in (None, "lateral", wanted_bias) and r["confidence"] != "alta":
                     continue
                 signals.append(r)
         except Exception as e:
