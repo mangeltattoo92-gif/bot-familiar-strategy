@@ -28,6 +28,7 @@ from paper_trading.engine import (
     DEFAULT_DB_PATH, get_settings, get_status, get_trades_count_today, get_unsettled_cash_today,
 )
 from paper_trading.family_sizing import select_affordable_contract
+from paper_trading.singleton_lock import exits_critical_section
 from webapp import market_data
 
 CONFIDENCE_ORDER = {"alta": 0, "media": 1, "baja": 2}
@@ -38,7 +39,11 @@ def main():
 
     # Pasos 1+2: cerrar posiciones que correspondan y chequear el
     # circuit breaker -- funcion REAL del proyecto, no reimplementada.
-    result["closed_positions_count"] = run_exits_for_account("piloto", DEFAULT_DB_PATH)
+    # Lock compartido con exit_watch.py (2026-09-15, motor liviano de
+    # solo-salidas cada 30s) para que nunca revisen/cierren la misma
+    # posicion al mismo tiempo.
+    with exits_critical_section():
+        result["closed_positions_count"] = run_exits_for_account("piloto", DEFAULT_DB_PATH)
 
     settings = get_settings()
     status = get_status()
