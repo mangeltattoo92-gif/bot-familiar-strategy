@@ -71,7 +71,10 @@ REENTRY_COOLDOWN_MINUTES = 15
 DEFAULT_INITIAL_BALANCE = 10000.0  # mismo placeholder que webapp/app.py hasta que cada quien fije su capital real
 
 CONFIDENCE_ORDER = {"alta": 0, "media": 1, "baja": 2}
-ALLOW_LOW_CONFIDENCE = True  # mismo criterio que trading-bot hoy -- revisar si genera señales de mala calidad
+ALLOW_LOW_CONFIDENCE = False  # 2026-09-15, a pedido del usuario tras la perdida rapida de TSLA
+# (confianza baja = señal que contradice la tendencia mayor; se demostro
+# en vivo que falla rapido). Antes era True. Las señales de confianza
+# baja siguen detectandose y reportandose, solo ya no se COMPRAN solas.
 
 MARKET_TZ = ZoneInfo("America/New_York")
 MARKET_OPEN_BAR_TIME = dtime(9, 30)
