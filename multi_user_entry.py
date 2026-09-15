@@ -332,6 +332,19 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
                 break
             if r["confidence"] == "baja" and not ALLOW_LOW_CONFIDENCE:
                 continue
+            # 2026-09-15, a pedido del usuario ("corregir las entradas en
+            # falsas volatilidades"): giro_sma20 salio 0/2 hoy en confianza
+            # media (SPY -20.69%, QQQ -20.11%), a diferencia de
+            # squeeze_breakout (10/13, +4.98% promedio historico) -- a
+            # diferencia de squeeze_breakout, giro_sma20 no exige compresion
+            # de bandas ni volumen alto por diseño (una de las dos perdidas
+            # de hoy tuvo volume_ratio apenas 1.57x, "regular"), asi que es
+            # mas propenso a "giros" que son solo ruido. Se exige respaldo
+            # real de tendencia 1h (confianza alta) para operarlo, en vez de
+            # desactivarlo del todo -- con solo 2 datos no alcanza para
+            # descartarlo, pero si para pedir mas confirmacion.
+            if r["strategy"] == "giro_sma20" and r["confidence"] != "alta":
+                continue
             ticker_verdict = daily_guide.get(r["symbol"], {}).get("verdict")
             if ticker_verdict == "cuidado" and r["confidence"] != "alta":
                 continue  # historial real de 60 dias malo en este ticker -- exige confianza alta

@@ -71,8 +71,15 @@ def main():
     for symbol in all_symbols:
         try:
             for r in scan_all_signals(symbol):
-                if r["signal"] != "none" and r["confidence"] != "baja" and symbol not in open_tickers:
-                    signals.append(r)
+                if r["signal"] == "none" or r["confidence"] == "baja" or symbol in open_tickers:
+                    continue
+                # 2026-09-15, mismo filtro que multi_user_entry.py -- ver la
+                # nota larga ahi: giro_sma20 salio 0/2 hoy en confianza media,
+                # sin el respaldo de volumen/compresion que si exige
+                # squeeze_breakout por diseño.
+                if r["strategy"] == "giro_sma20" and r["confidence"] != "alta":
+                    continue
+                signals.append(r)
         except Exception as e:
             result["notes"].append(f"Error escaneando {symbol}: {e}")
 
