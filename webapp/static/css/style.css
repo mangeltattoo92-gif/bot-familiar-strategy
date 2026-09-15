@@ -723,6 +723,7 @@ tr:last-child td { border-bottom: none; }
 }
 .badge-buy { color: var(--green); background: var(--green-soft); }
 .badge-sell { color: var(--red); background: var(--red-soft); }
+.badge-neutral { color: var(--amber); background: var(--amber-soft); }
 .badge-type {
   color: var(--muted);
   background: var(--bg-soft);

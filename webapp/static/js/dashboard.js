@@ -253,6 +253,60 @@ affordableToggle.addEventListener("click", () => {
   setAffordableCollapsed(!affordableBox.classList.contains("collapsed"));
 });
 
+/* ---------- Guia diaria por ticker (2026-09-15, a pedido del usuario --
+   backtest real de 60 dias por ticker, ver daily_guide.py) ---------- */
+const GUIDE_COLLAPSED_KEY = "mapi-guide-panel-collapsed";
+const guideBox = document.getElementById("guide-box");
+const guideToggle = document.getElementById("guide-toggle");
+let guideLoaded = false;
+
+const GUIDE_BADGE = {
+  seguro: { label: "Seguro", cls: "badge-buy" },
+  neutral: { label: "Neutral", cls: "badge-neutral" },
+  cuidado: { label: "Cuidado", cls: "badge-sell" },
+  sin_datos: { label: "Sin datos", cls: "badge-type" },
+};
+
+async function refreshDailyGuide() {
+  const data = await fetchJSON("/api/daily-guide");
+  if (!data) return;
+  const tbody = document.querySelector("#guide-table tbody");
+  tbody.innerHTML = "";
+  const tickers = data.tickers || {};
+  const symbols = Object.keys(tickers).sort();
+  document.getElementById("guide-empty").hidden = symbols.length > 0;
+  if (data.updated_at) setLastUpdated("guide-updated", data.updated_at);
+  for (const sym of symbols) {
+    const g = tickers[sym];
+    const badge = GUIDE_BADGE[g.verdict] || GUIDE_BADGE.sin_datos;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><strong>${sym}</strong></td>
+      <td data-label="Veredicto"><span class="badge ${badge.cls}">${badge.label}</span></td>
+      <td data-label="Aciertos">${g.win_rate != null ? g.win_rate.toFixed(1) + "%" : "—"}</td>
+      <td data-label="Operaciones (60d)" class="small">${g.n}</td>
+      <td data-label="P&L promedio" class="${g.avg_pnl_pct >= 0 ? "positive" : "negative"}">${g.avg_pnl_pct != null ? fmtPct(g.avg_pnl_pct) : "—"}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function setGuideCollapsed(collapsed) {
+  guideBox.classList.toggle("collapsed", collapsed);
+  guideToggle.classList.toggle("collapsed", collapsed);
+  guideToggle.setAttribute("aria-expanded", String(!collapsed));
+  guideToggle.title = collapsed ? "Expandir" : "Minimizar";
+  localStorage.setItem(GUIDE_COLLAPSED_KEY, collapsed ? "1" : "0");
+  if (!collapsed && !guideLoaded) {
+    guideLoaded = true;
+    refreshDailyGuide();
+  }
+}
+setGuideCollapsed(localStorage.getItem(GUIDE_COLLAPSED_KEY) !== "0");
+guideToggle.addEventListener("click", () => {
+  setGuideCollapsed(!guideBox.classList.contains("collapsed"));
+});
+
 /* ---------- Collapsible mercado panel ---------- */
 const MERCADO_COLLAPSED_KEY = "mapi-mercado-panel-collapsed";
 const mercadoBox = document.getElementById("mercado-box");

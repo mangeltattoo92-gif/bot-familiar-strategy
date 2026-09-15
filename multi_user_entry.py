@@ -56,6 +56,7 @@ from paper_trading.engine import (
     record_trade,
     update_settings,
 )
+from daily_guide import load_guide as load_daily_guide
 from paper_trading.family_sizing import estimate_affordable_symbols, select_affordable_contract
 from paper_trading.option_selection import MAX_SPREAD_PCT
 from paper_trading.singleton_lock import acquire_single_instance_lock
@@ -307,6 +308,15 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
     unique_symbols = {r["symbol"] for r in signals}
     spot_prices = {sym: market_data.get_quote(sym) for sym in unique_symbols}
 
+    # Guia diaria por ticker (2026-09-15, a pedido del usuario -- ver
+    # daily_guide.py): capa extra de prudencia sobre el historial REAL
+    # de cada ticker especifico, no solo la señal del momento. Si el
+    # archivo no existe todavia (primer dia, o el cron de la madrugada
+    # todavia no corrio), daily_guide devuelve {} -- ningun ticker queda
+    # bloqueado por falta de datos, solo se exige mas cuando SI hay
+    # evidencia real de que un ticker rinde mal.
+    daily_guide = load_daily_guide()
+
     for username, db_path in accounts:
         settings = get_settings(db_path)
         if not settings["bot_enabled"]:
@@ -322,6 +332,9 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
                 break
             if r["confidence"] == "baja" and not ALLOW_LOW_CONFIDENCE:
                 continue
+            ticker_verdict = daily_guide.get(r["symbol"], {}).get("verdict")
+            if ticker_verdict == "cuidado" and r["confidence"] != "alta":
+                continue  # historial real de 60 dias malo en este ticker -- exige confianza alta
             if r["symbol"] not in my_affordable:
                 continue  # pre-filtro por poder de compra -- ver estimate_affordable_symbols
             if r["symbol"] in open_tickers or r["symbol"] in used_tickers:

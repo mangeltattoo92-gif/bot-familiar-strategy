@@ -223,6 +223,35 @@
       </div>
     </section>
 
+    <section class="panel" id="panel-daily-guide">
+      <div class="panel-head">
+        <h2>Guía diaria por ticker <span class="muted" id="guide-updated">—</span></h2>
+        <div class="panel-head-right">
+          <button class="panel-toggle collapsed" id="guide-toggle" title="Expandir" aria-label="Expandir panel" aria-expanded="false">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6.7 8.3a1 1 0 0 1 1.4 0L12 12.17l3.9-3.87a1 1 0 1 1 1.4 1.42l-4.6 4.56a1 1 0 0 1-1.4 0L6.7 9.72a1 1 0 0 1 0-1.42Z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="collapsible collapsed" id="guide-box">
+        <p class="muted small">Backtest real de 60 días por ticker — cómo le fue de verdad a las estrategias ahí. "Cuidado" exige confianza alta antes de operar ese ticker; el resto de las reglas no cambia.</p>
+        <div class="table-wrap">
+          <table id="guide-table">
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Veredicto</th>
+                <th>Aciertos</th>
+                <th>Operaciones (60d)</th>
+                <th>P&amp;L promedio</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="muted empty-msg" id="guide-empty" hidden>Todavía no hay guía generada — corre esta noche antes de la apertura.</p>
+      </div>
+    </section>
+
     <section class="panel" id="panel-errors">
       <div class="panel-head">
         <h2>Errores y operaciones rechazadas <span class="muted" id="error-log-count">(0)</span></h2>

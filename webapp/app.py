@@ -868,6 +868,21 @@ def api_affordable_symbols():
     })
 
 
+@app.route("/api/daily-guide")
+@login_required
+def api_daily_guide():
+    # 2026-09-15, a pedido del usuario: guia diaria por ticker basada en
+    # backtest real de 60 dias (ver daily_guide.py) -- mismos datos que
+    # usa el motor de entradas para exigir mas confianza en tickers
+    # 'cuidado', expuestos aca para que el usuario los pueda leer.
+    try:
+        with open(ROOT / "data" / "daily_guide.json", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return jsonify({"updated_at": None, "tickers": {}})
+    return jsonify(data)
+
+
 @app.route("/api/bot-status", methods=["GET", "POST"])
 @login_required
 def api_bot_status():
