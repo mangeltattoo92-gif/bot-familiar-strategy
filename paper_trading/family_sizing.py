@@ -121,7 +121,17 @@ def select_affordable_contract(
         primary_price = primary.get("ask") or primary["price"]
         qty = compute_quantity(sizing_mode, account_value, risk_pct, fixed_contracts, primary_price, available_cash, multiplier)
         if qty >= 1:
-            return primary, "primario (mayor volumen en rango de delta 0.40-0.60)", qty
+            # Bug real encontrado 2026-09-15: antes esto SIEMPRE decia "en
+            # rango de delta 0.40-0.60" aunque select_contract() hubiera
+            # usado su propio camino de respaldo (delta hasta 0.75) por
+            # strikes muy espaciados -- un contrato con delta 0.67 se
+            # reportaba como si hubiera cumplido el rango objetivo. Ahora
+            # el motivo refleja cual rango se uso de verdad.
+            if primary.get("used_fallback_range"):
+                reason = "primario -- strikes espaciados, delta fuera de 0.40-0.60 pero dentro del respaldo 0.25-0.75 (mayor volumen de esos)"
+            else:
+                reason = "primario (mayor volumen en rango de delta 0.40-0.60)"
+            return primary, reason, qty
 
     ticker = yf.Ticker(symbol)
     expirations = _with_timeout(lambda: ticker.options)

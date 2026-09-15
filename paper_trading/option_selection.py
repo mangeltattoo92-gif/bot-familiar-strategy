@@ -163,10 +163,12 @@ def select_contract(symbol: str, option_type: str, spot_price: float) -> dict | 
         return None
 
     in_range = [(row, d) for row, d in candidates if DELTA_RANGE[0] <= abs(d) <= DELTA_RANGE[1]]
+    used_fallback_range = False
     if in_range:
         # Mayor volumen entre los que ya estan en el rango de delta objetivo.
         best_row, best_delta = max(in_range, key=lambda rd: float(rd[0].get("volume") or 0))
     else:
+        used_fallback_range = True
         # Ningun strike cayo en el rango (strikes muy espaciados) -- se
         # cae a |delta| mas cercano a TARGET_DELTA, pero SOLO entre los
         # que igual caen dentro de FALLBACK_DELTA_RANGE -- un delta mas
@@ -197,4 +199,12 @@ def select_contract(symbol: str, option_type: str, spot_price: float) -> dict | 
         "option_type": option_type,
         "open_interest": int(best_row.get("openInterest") or 0),
         "volume": int(best_row.get("volume") or 0),
+        # Bug real encontrado 2026-09-15: family_sizing.select_affordable_contract()
+        # etiquetaba CUALQUIER resultado de select_contract() como "primario
+        # (rango 0.40-0.60)" sin chequear si en realidad vino del camino de
+        # respaldo (FALLBACK_DELTA_RANGE, 0.25-0.75) -- un contrato con delta
+        # 0.67 (fuera del rango objetivo pero dentro del respaldo, ambos
+        # comportamientos correctos) se reportaba como si hubiera cumplido el
+        # rango objetivo. Este flag permite armar el motivo real.
+        "used_fallback_range": used_fallback_range,
     }
