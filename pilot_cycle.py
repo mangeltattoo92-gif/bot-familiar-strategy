@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from daily_market_bias import load_bias as load_daily_market_bias
 from multi_user_entry import run_exits_for_account
+from news_watch import has_recent_news
 from paper_trading.bollinger_strategy import scan_all_signals, too_close_to_open_new_position
 from paper_trading.engine import (
     DEFAULT_DB_PATH, get_settings, get_status, get_trades_count_today, get_unsettled_cash_today,
@@ -86,6 +87,10 @@ def main():
                 wanted_bias = "alcista" if r["signal"] == "buy_call" else "bajista"
                 if ticker_bias not in (None, "lateral", wanted_bias) and r["confidence"] != "alta":
                     continue
+                if r["confidence"] != "alta":
+                    has_news, _headline = has_recent_news(symbol)
+                    if has_news:
+                        continue
                 signals.append(r)
         except Exception as e:
             result["notes"].append(f"Error escaneando {symbol}: {e}")

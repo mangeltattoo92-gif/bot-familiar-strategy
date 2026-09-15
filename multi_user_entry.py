@@ -59,6 +59,7 @@ from paper_trading.engine import (
 )
 from daily_guide import load_guide as load_daily_guide
 from daily_market_bias import load_bias as load_daily_market_bias
+from news_watch import has_recent_news
 from paper_trading.family_sizing import estimate_affordable_symbols, select_affordable_contract
 from paper_trading.option_selection import MAX_SPREAD_PCT
 from paper_trading.singleton_lock import acquire_single_instance_lock, exits_critical_section
@@ -364,6 +365,12 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
     # datos, igual que daily_guide.
     daily_bias = load_daily_market_bias()
 
+    # 2026-09-15: contador de respaldo -- ver la nota junto a su uso mas
+    # abajo (bug real encontrado hoy: watchdog.py reiniciaba este proceso
+    # en falso porque, con tantos filtros de entrada nuevos hoy, un ciclo
+    # entero podia terminar sin escribir NADA en el log).
+    total_trades_this_cycle = 0
+
     for username, db_path in accounts:
         settings = get_settings(db_path)
         if not settings["bot_enabled"]:
@@ -419,6 +426,17 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
             wanted_bias = "alcista" if r["signal"] == "buy_call" else "bajista"
             if ticker_bias not in (None, "lateral", wanted_bias) and r["confidence"] != "alta":
                 continue  # señal contra el sesgo diario del ticker -- exige confianza alta
+            # 2026-09-15, a pedido del usuario (noticias reales en tiempo
+            # real -- ver news_watch.py): si hay una noticia real de Yahoo
+            # Finance publicada en las ultimas 6h para este ticker, el
+            # precio puede estar moviendose por la noticia y no por la
+            # señal tecnica -- se exige confianza alta. Solo se chequea si
+            # todavia no es alta (ahorra la llamada de red si ya no hace
+            # falta).
+            if r["confidence"] != "alta":
+                has_news, _headline = has_recent_news(r["symbol"])
+                if has_news:
+                    continue
             if r["symbol"] not in my_affordable:
                 continue  # pre-filtro por poder de compra -- ver estimate_affordable_symbols
             if r["symbol"] in open_tickers or r["symbol"] in used_tickers:
@@ -469,10 +487,26 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
                 _log(f"[{username}] EJECUTADO {r['signal'].upper()} {r['symbol']} strike {contract['strike']} "
                      f"@ {fill_price:.2f} ask real ({method})")
                 trades_this_cycle += 1
+                total_trades_this_cycle += 1
                 used_tickers.add(r["symbol"])
                 status = get_status(db_path=db_path)
             except Exception as e:
                 _log(f"[{username}] OMITIDO {r['symbol']}: {e}")
+
+    if total_trades_this_cycle == 0:
+        # Bug real encontrado 2026-09-15: `signals` no estaba vacio (por
+        # eso no se corto antes con el log de "Sin señales de entrada"),
+        # pero TODAS las señales terminaron descartadas por los filtros de
+        # cada cuenta (confianza, volumen, sesgo diario, noticias, etc.)
+        # sin que ninguna rama del loop de arriba escribiera una linea de
+        # log -- el ciclo terminaba en silencio total. watchdog.py mide
+        # "colgado" por inactividad del log (> 720s) y reiniciaba este
+        # proceso sano una y otra vez durante horas de mercado, cada vez
+        # que coincidian varios ciclos seguidos sin ninguna señal que
+        # pasara los filtros. Este log de respaldo garantiza que el
+        # archivo SIEMPRE crece cada ciclo, pase lo que pase.
+        _log(f"{len(signals)} señal(es) detectada(s) este ciclo, ninguna paso los filtros de entrada "
+             f"de ninguna cuenta activa.")
 
 
 def run_cycle() -> None:
