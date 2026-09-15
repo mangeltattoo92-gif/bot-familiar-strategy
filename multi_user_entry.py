@@ -28,6 +28,7 @@ Uso:
     colgados que se encontro hoy en trading-bot con el loop largo).
 """
 import argparse
+import json
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -66,6 +67,7 @@ from webapp.auth import STATUS_ACTIVE, list_all_users
 DATA_DIR = ROOT / "data"
 USERS_DATA_DIR = DATA_DIR / "users"
 LOG_PATH = DATA_DIR / "multi_user_entry.log"
+PEAK_PNL_STATE_PATH = DATA_DIR / "peak_pnl_tracker.json"
 
 DEFAULT_INTERVAL_SECONDS = 120
 REENTRY_COOLDOWN_MINUTES = 15
@@ -182,10 +184,25 @@ def _check_circuit_breaker(db_path: Path, username: str, current_prices: dict[st
         _log(msg)
 
 
+def _load_peak_state() -> dict:
+    if not PEAK_PNL_STATE_PATH.exists():
+        return {}
+    try:
+        return json.loads(PEAK_PNL_STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_peak_state(state: dict) -> None:
+    PEAK_PNL_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PEAK_PNL_STATE_PATH.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+
 def run_exits_for_account(username: str, db_path: Path) -> int:
     status = get_status(db_path=db_path)
     closed = 0
     current_prices: dict[str, float] = {}
+    peak_state = _load_peak_state()
     for p in status["positions"]:
         price = _current_price(p)
         if price is None:
@@ -214,11 +231,21 @@ def run_exits_for_account(username: str, db_path: Path) -> int:
             wanted = "bajista" if p["option_details"]["option_type"] == "put" else "alcista"
             hourly_aligned = trend_1h == wanted
 
+        # Rastreo de pico de ganancia (2026-09-15) -- ver PEAK_PROFIT_LOCK_PCT
+        # en bollinger_strategy.py. Estado compartido entre este ciclo (cada
+        # 120s) y exit_watch.py (cada 30s), ambos protegidos por
+        # exits_critical_section() en el llamador -- nunca corren a la vez.
+        peak_id = f"{username}::{p['key']}::{p['opened_at']}"
+        current_pnl_pct = (exit_price / p["avg_cost"] - 1) if p["avg_cost"] else 0.0
+        peak_pnl_pct = max(peak_state.get(peak_id, current_pnl_pct), current_pnl_pct)
+        peak_state[peak_id] = peak_pnl_pct
+
         result = evaluate_open_position_exit(
             entry_premium=p["avg_cost"], current_premium=exit_price,
             profit_target_pct=p["profit_target_pct"] or 0.10, technical_exit_signal=exit_signal,
             hourly_aligned=hourly_aligned, force_eod_exit=_is_near_expiration(p, now_utc),
             stop_loss_pct=p["stop_loss_pct"] or 0.20, minutes_since_entry=minutes_since_entry,
+            peak_pnl_pct=peak_pnl_pct,
         )
         if result["should_close"]:
             reason = (f"[multi_user_entry -- cuenta {username}] Cierre automatico por regla "
@@ -235,6 +262,8 @@ def run_exits_for_account(username: str, db_path: Path) -> int:
             _log(f"[{username}] CIERRE {p['ticker']} -> {result['reason']} "
                  f"({result['pnl_pct']*100:+.2f}%) @ {exit_price:.2f} (bid real)")
             closed += 1
+            peak_state.pop(peak_id, None)
+    _save_peak_state(peak_state)
     _check_circuit_breaker(db_path, username, current_prices)
     return closed
 
@@ -344,6 +373,19 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
             # desactivarlo del todo -- con solo 2 datos no alcanza para
             # descartarlo, pero si para pedir mas confirmacion.
             if r["strategy"] == "giro_sma20" and r["confidence"] != "alta":
+                continue
+            # 2026-09-15, mismo dia: MARA perdio -23.73% con volume_ratio de
+            # apenas 1.19x ("regular", el umbral de "extrema" ya definido en
+            # bollinger_strategy.STRONG_VOLUME_MULT es 2.0x). Separando el
+            # historial de squeeze_breakout por fuerza de volumen: "extrema"
+            # dio 8/10 ganadoras (+7.47% promedio), "regular" dio -2.89%
+            # promedio (arrastrado por MARA). Igual que con giro_sma20, se
+            # exige la confirmacion real de volumen en vez de confiar solo en
+            # la confianza -- el propio squeeze_breakout ya calcula esto para
+            # el tamaño del objetivo de ganancia, solo faltaba usarlo tambien
+            # para decidir si entrar.
+            if (r["strategy"] in ("squeeze_breakout", "squeeze_breakout_temprano")
+                    and r.get("volatility_strength") != "extrema"):
                 continue
             ticker_verdict = daily_guide.get(r["symbol"], {}).get("verdict")
             if ticker_verdict == "cuidado" and r["confidence"] != "alta":

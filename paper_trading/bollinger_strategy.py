@@ -1868,6 +1868,23 @@ EARLY_LOCK_WITHOUT_1H_SUPPORT_PCT = 0.05  # asegurar ganancia desde +5% si 1h no
 QUICK_PROFIT_PCT = 0.08          # +8% ya se considera una ganancia rapida solida
 QUICK_PROFIT_MIN_MINUTES = 15    # esperar al menos 1 vela de 15m completa antes de aplicar esta regla
 
+# 2026-09-15, a pedido del usuario tras una sesion con varias perdidas
+# ("no podemos entrar en las falsas volatilidades y si eso pasa hay que
+# tomar ganancias antes de que haya perdidas"): las reglas de arriba solo
+# protegen ganancia cuando la posicion YA esta en positivo en el momento
+# del chequeo (regla 4) o llego a +5% (regla 5) -- ninguna mira el
+# CAMINO. Caso real: HOOD hoy llego a estar unos minutos en ganancia (el
+# quiebre bajista funciono al principio) y despues se revirtio del todo
+# hasta el stop-loss (-22.52%), sin que ninguna regla existente actuara
+# en el medio porque el chequeo de entonces (cada 120s) no coincidio con
+# la ventana breve de ganancia. Con el nuevo motor de salidas de 30s esto
+# ya deberia pasar menos, pero igual hace falta una regla que mire el
+# PICO de ganancia visto durante toda la posicion, no solo el momento
+# actual: una vez que se vio una ganancia real de PEAK_PROFIT_LOCK_PCT o
+# mas, no se deja que la posicion vuelva a cero o negativo -- se asegura
+# lo que se pueda apenas cruce de vuelta por debajo de PEAK_PROFIT_LOCK_PCT.
+PEAK_PROFIT_LOCK_PCT = 0.03      # a partir de +3% de pico visto, se protege esa ganancia
+
 
 def evaluate_open_position_exit(
     entry_premium: float,
@@ -1879,6 +1896,7 @@ def evaluate_open_position_exit(
     stop_loss_pct: float = STOP_LOSS_PCT,
     minutes_since_entry: float = 0.0,
     quick_profit_pct: float = QUICK_PROFIT_PCT,
+    peak_pnl_pct: float | None = None,
 ) -> dict:
     """Decide si cerrar una posicion abierta ahora mismo, y por que. Orden
     de prioridad (lo que ocurra primero):
@@ -1895,21 +1913,28 @@ def evaluate_open_position_exit(
          con el riesgo que eso agrega (gaps fuera de horario, caida de la
          prima por el paso de los dias) a cambio de mas tiempo para
          alcanzar el objetivo. Ver INCIDENTS.md y CLAUDE.md.
-      4) Señal tecnica de reversion Y la posicion esta en ganancia (aunque
+      4) Se vio un PICO de ganancia de al menos PEAK_PROFIT_LOCK_PCT en
+         algun momento de la posicion (peak_pnl_pct) Y la ganancia actual
+         ya volvio a 0 o menos -> cerrar YA. 2026-09-15, a pedido del
+         usuario: una posicion que llego a estar en ganancia real no debe
+         terminar dando vuelta a perdida sin que se intente asegurar algo
+         en el camino -- ver la nota junto a PEAK_PROFIT_LOCK_PCT arriba
+         (caso real: HOOD).
+      5) Señal tecnica de reversion Y la posicion esta en ganancia (aunque
          no haya llegado al objetivo) -> cerrar YA para proteger esa
          ganancia, en vez de esperar a que el mercado no llegue al objetivo
          por defecto y termine dando vuelta a perdida.
-      5) La tendencia de 1h NO respalda la direccion de la entrada
+      6) La tendencia de 1h NO respalda la direccion de la entrada
          (hourly_aligned=False) Y ya hay una ganancia razonable
          (>= EARLY_LOCK_WITHOUT_1H_SUPPORT_PCT) -> asegurarla ahora.
-      6) Ya paso al menos una vela de 15m completa (minutes_since_entry >=
+      7) Ya paso al menos una vela de 15m completa (minutes_since_entry >=
          QUICK_PROFIT_MIN_MINUTES) Y la ganancia ya es solida
          (>= quick_profit_pct) -> tomar la ganancia YA, sin esperar el
          objetivo completo. Prioriza velocidad: en 15m, una ganancia en
          mano vale mas que esperar horas por un objetivo mayor.
-      7) Si nada de lo anterior aplica -> mantener y dejar correr hacia el
+      8) Si nada de lo anterior aplica -> mantener y dejar correr hacia el
          objetivo completo (paso 1).
-      8) Señal tecnica de reversion pero la posicion sigue en perdida (no
+      9) Señal tecnica de reversion pero la posicion sigue en perdida (no
          llego al stop) -> NO se fuerza el cierre solo por la señal; el
          stop-loss sigue siendo el limite (evita salidas prematuras por
          ruido cuando ya se acepto ese riesgo al entrar).
@@ -1924,6 +1949,8 @@ def evaluate_open_position_exit(
         return {"should_close": True, "reason": "stop_loss", "pnl_pct": pnl_pct}
     if force_eod_exit:
         return {"should_close": True, "reason": "cierre_por_vencimiento", "pnl_pct": pnl_pct}
+    if peak_pnl_pct is not None and peak_pnl_pct >= PEAK_PROFIT_LOCK_PCT and pnl_pct <= 0:
+        return {"should_close": True, "reason": "proteger_pico_de_ganancia", "pnl_pct": pnl_pct}
     if technical_exit_signal and pnl_pct > 0:
         return {"should_close": True, "reason": "proteger_ganancia_parcial", "pnl_pct": pnl_pct}
     if not hourly_aligned and pnl_pct >= EARLY_LOCK_WITHOUT_1H_SUPPORT_PCT:
