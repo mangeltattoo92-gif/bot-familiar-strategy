@@ -6,10 +6,14 @@ refrescarse aunque no haya una sesion de Claude activa.
 Todo con cache en memoria de corta duracion para no saturar yfinance.
 """
 
+import json
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeoutError
 from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
 
+import pandas as pd
 import yfinance as yf
 
 # Backoff ante rate-limit de Yahoo (2026-09-10 -- la ampliacion de
@@ -81,6 +85,70 @@ _market_cache: dict[str, tuple[float, object]] = {}
 _option_chain_cache: dict[str, tuple[float, object]] = {}
 _OPTION_CHAIN_TTL = 15  # segundos -- option_chain() es lento (~1-2s), cachear evita repetirlo en cada refresco
 
+# 2026-09-16, a pedido del usuario ("que no tenga problemas" al escalar a
+# mas usuarios): el cache de arriba es SOLO en memoria del proceso -- pero
+# multi_user_entry_loop.py y exit_watch_loop.py arrancan un PROCESO NUEVO
+# en cada ciclo (a proposito, ver la nota en multi_user_entry_loop.py
+# sobre threads colgados), asi que ese cache se borra cada vez y nunca se
+# comparte entre el motor de entradas (cada 120s) y el de salidas rapidas
+# (cada 30s) aunque esten chequeando la MISMA posicion segundos despues.
+# Este cache en disco (mismo TTL, mismo criterio de "vencido") persiste
+# entre procesos y se comparte entre todos -- reduce las llamadas de red a
+# Yahoo Finance a medida que se suman mas usuarios/posiciones, sin cambiar
+# ninguna decision de trading (mismos datos, solo se piden menos veces).
+_DISK_CACHE_DIR = Path(__file__).resolve().parent.parent / "data"
+_QUOTE_DISK_CACHE = _DISK_CACHE_DIR / "quote_cache.json"
+_OPTION_CHAIN_DISK_CACHE = _DISK_CACHE_DIR / "option_chain_cache.json"
+
+
+def _load_disk_cache(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_disk_cache(path: Path, data: dict) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        tmp.replace(path)  # atomico -- nunca deja el archivo a medio escribir
+    except Exception:
+        pass  # el cache es una optimizacion -- si falla, se sigue pidiendo la red normal
+
+
+def _get_option_chain_cached(underlying: str, expiration: str):
+    """Cadena de opciones (calls/puts) con cache de 2 niveles: memoria del
+    proceso actual (mas rapido) y disco (compartido entre procesos/ciclos
+    distintos dentro del mismo TTL). Devuelve un objeto con .calls/.puts
+    (DataFrames), igual que yf.Ticker(...).option_chain(...)."""
+    cache_key = f"{underlying}_{expiration}"
+    now = time.time()
+
+    cached = _option_chain_cache.get(cache_key)
+    if cached and now - cached[0] < _OPTION_CHAIN_TTL:
+        return cached[1]
+
+    disk_cache = _load_disk_cache(_OPTION_CHAIN_DISK_CACHE)
+    disk_entry = disk_cache.get(cache_key)
+    if disk_entry and now - disk_entry[0] < _OPTION_CHAIN_TTL:
+        chain = SimpleNamespace(
+            calls=pd.DataFrame(disk_entry[1]["calls"]),
+            puts=pd.DataFrame(disk_entry[1]["puts"]),
+        )
+        _option_chain_cache[cache_key] = (disk_entry[0], chain)
+        return chain
+
+    chain = _with_timeout(lambda: yf.Ticker(underlying).option_chain(expiration))
+    _option_chain_cache[cache_key] = (now, chain)
+    disk_cache[cache_key] = (now, {
+        "calls": chain.calls.to_dict(orient="records"),
+        "puts": chain.puts.to_dict(orient="records"),
+    })
+    _save_disk_cache(_OPTION_CHAIN_DISK_CACHE, disk_cache)
+    return chain
+
 MARKET_INDEXES = {
     "S&P 500": "^GSPC",
     "Nasdaq 100": "^NDX",
@@ -117,6 +185,13 @@ def get_quote(symbol: str) -> float | None:
     cached = _quote_cache.get(symbol)
     if cached and now - cached[0] < _QUOTE_TTL:
         return cached[1]
+
+    disk_cache = _load_disk_cache(_QUOTE_DISK_CACHE)
+    disk_entry = disk_cache.get(symbol)
+    if disk_entry and now - disk_entry[0] < _QUOTE_TTL:
+        _quote_cache[symbol] = tuple(disk_entry)
+        return disk_entry[1]
+
     price = None
     try:
         info = _with_timeout(lambda: yf.Ticker(symbol).fast_info)
@@ -129,6 +204,8 @@ def get_quote(symbol: str) -> float | None:
         except Exception:
             price = None
     _quote_cache[symbol] = (now, price)
+    disk_cache[symbol] = (now, price)
+    _save_disk_cache(_QUOTE_DISK_CACHE, disk_cache)
     return price
 
 
@@ -169,14 +246,7 @@ def get_option_price(underlying: str, expiration: str, strike: float, option_typ
     centavos del precio real; para el strike exacto (caso normal) no aplica
     ninguna interpolacion y el precio es el bid/ask real."""
     try:
-        cache_key = f"{underlying}_{expiration}"
-        now = time.time()
-        cached = _option_chain_cache.get(cache_key)
-        if cached and now - cached[0] < _OPTION_CHAIN_TTL:
-            chain = cached[1]
-        else:
-            chain = _with_timeout(lambda: yf.Ticker(underlying).option_chain(expiration))
-            _option_chain_cache[cache_key] = (now, chain)
+        chain = _get_option_chain_cached(underlying, expiration)
         df = chain.calls if option_type.lower() == "call" else chain.puts
         strike = float(strike)
         row = df[df["strike"] == strike]
@@ -212,14 +282,7 @@ def get_option_bid_ask(underlying: str, expiration: str, strike: float, option_t
     ese caso (raro en la practica: el strike de salida es el mismo que se
     eligio al entrar, que si estaba en la cadena en ese momento)."""
     try:
-        cache_key = f"{underlying}_{expiration}"
-        now = time.time()
-        cached = _option_chain_cache.get(cache_key)
-        if cached and now - cached[0] < _OPTION_CHAIN_TTL:
-            chain = cached[1]
-        else:
-            chain = _with_timeout(lambda: yf.Ticker(underlying).option_chain(expiration))
-            _option_chain_cache[cache_key] = (now, chain)
+        chain = _get_option_chain_cached(underlying, expiration)
         df = chain.calls if option_type.lower() == "call" else chain.puts
         row = df[df["strike"] == float(strike)]
         if row.empty:
