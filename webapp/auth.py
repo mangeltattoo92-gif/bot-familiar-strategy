@@ -199,6 +199,26 @@ def get_user(username: str, db_path: Path = DEFAULT_USERS_DB) -> dict | None:
         conn.close()
 
 
+def find_user_by_login(identifier: str, db_path: Path = DEFAULT_USERS_DB) -> dict | None:
+    """Busca un usuario por su 'username' O su 'email', sin distinguir
+    mayusculas/minusculas -- SOLO para el formulario de login, donde
+    alguien facilmente puede escribir su correo en vez de su nombre de
+    usuario (bug real encontrado 2026-09-16: un usuario nuevo no pudo
+    entrar 3 veces seguidas por esto exacto). get_user() sigue igual
+    (match exacto) para el resto del codigo, que siempre lo llama con
+    el username canonico ya guardado en la sesion, nunca con texto que
+    tipeo una persona."""
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE",
+            (identifier, identifier),
+        ).fetchone()
+        return _row_to_dict(row)
+    finally:
+        conn.close()
+
+
 def get_user_by_id(user_id: int, db_path: Path = DEFAULT_USERS_DB) -> dict | None:
     conn = _connect(db_path)
     try:

@@ -53,6 +53,7 @@ from webapp.auth import (  # noqa: E402
     STATUS_PENDING,
     STATUS_REJECTED,
     disconnect_user,
+    find_user_by_login,
     generate_activation_code,
     get_user,
     get_user_by_id,
@@ -229,8 +230,14 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        user = get_user(username) if username else None
-        if not username or not password or user is None or not verify_password(username, password):
+        # 2026-09-16, bug real encontrado: un usuario nuevo escribio su
+        # correo en el campo de usuario y no pudo entrar 3 veces seguidas
+        # -- find_user_by_login() acepta username O email, sin distinguir
+        # mayusculas/minusculas. verify_password() sigue necesitando el
+        # username CANONICO (guardado en la BD), no lo que la persona
+        # tipeo, por eso se usa user["username"] una vez resuelto.
+        user = find_user_by_login(username) if username else None
+        if not username or not password or user is None or not verify_password(user["username"], password):
             error = "Usuario o contrasena incorrectos."
         elif user["status"] == STATUS_PENDING:
             error = "Tu cuenta todavia esta pendiente de aprobacion."
