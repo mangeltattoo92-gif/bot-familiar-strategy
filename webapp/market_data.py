@@ -7,7 +7,9 @@ Todo con cache en memoria de corta duracion para no saturar yfinance.
 """
 
 import json
+import os
 import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeoutError
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +17,33 @@ from types import SimpleNamespace
 
 import pandas as pd
 import yfinance as yf
+
+# 2026-09-16, a pedido del usuario ("mejor tenerlo de respaldo, evitar un
+# tropezon en el futuro"): Yahoo (via yfinance) ya nos rate-limito antes
+# (ver la nota de abajo, 2026-09-10) -- Finnhub es un proveedor DISTINTO,
+# con su propio limite de tasa separado, SOLO para el precio del
+# subyacente (no cubre opciones -- investigado, no hay alternativa gratis
+# viable para eso). Nunca se consultan las dos fuentes a la vez: Yahoo
+# primero siempre, Finnhub SOLO si Yahoo fallo, y el resultado reemplaza
+# al de Yahoo (nunca se comparan ni se promedian). Inactivo hasta que se
+# configure FINNHUB_API_KEY (variable de entorno, ver
+# /etc/bot-familiar/claude-code.env) -- sin la clave, el comportamiento
+# es exactamente el mismo que antes de este cambio.
+_FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY", "").strip()
+_FINNHUB_TIMEOUT = 8  # segundos
+
+
+def _get_quote_finnhub(symbol: str) -> float | None:
+    if not _FINNHUB_API_KEY:
+        return None
+    try:
+        url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={_FINNHUB_API_KEY}"
+        with urllib.request.urlopen(url, timeout=_FINNHUB_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        price = data.get("c")  # "current price" en la respuesta de Finnhub
+        return float(price) if price else None
+    except Exception:
+        return None
 
 # Backoff ante rate-limit de Yahoo (2026-09-10 -- la ampliacion de
 # watchlist a 101 tickers con 3 procesos escaneando en paralelo (cada uno
@@ -203,6 +232,11 @@ def get_quote(symbol: str) -> float | None:
                 price = float(hist["Close"].iloc[-1])
         except Exception:
             price = None
+    if price is None:
+        # Respaldo -- SOLO se llega aca si Yahoo ya fallo de las dos
+        # formas de arriba. Ver la nota junto a _FINNHUB_API_KEY: inactivo
+        # sin la clave configurada, mismo comportamiento que antes.
+        price = _get_quote_finnhub(symbol)
     _quote_cache[symbol] = (now, price)
     disk_cache[symbol] = (now, price)
     _save_disk_cache(_QUOTE_DISK_CACHE, disk_cache)
