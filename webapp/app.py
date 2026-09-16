@@ -43,6 +43,7 @@ from paper_trading.engine import (  # noqa: E402
 )
 from paper_trading.family_sizing import estimate_affordable_symbols  # noqa: E402
 from paper_trading import nyse_calendar  # noqa: E402
+from multi_user_entry import _current_exit_price  # noqa: E402
 from paper_trading.trade_journal import daily_breakdown, get_closed_trades, get_todays_closed_trades, weekly_summary  # noqa: E402
 from webapp import market_data  # noqa: E402
 from webapp.email_sender import send_activation_email  # noqa: E402
@@ -649,7 +650,15 @@ def _build_current_prices(positions: list[dict]) -> dict:
                 prices[p["ticker"]] = price
         elif p["asset_type"] == "option":
             od = p["option_details"]
-            price = market_data.get_option_price(p["ticker"], od["expiration"], od["strike"], od["option_type"])
+            # 2026-09-16, a pedido del usuario: antes esto mostraba el punto
+            # medio (bid/ask promedio), pero las salidas REALES (stop-loss,
+            # objetivo, toma rapida) deciden con el BID real -- una posicion
+            # podia verse en +13% en el panel y cerrarse en +8.96% de
+            # verdad, generando confusion ("por que no vendio si estaba en
+            # +13%"). Ahora el panel usa la MISMA funcion que usa
+            # run_exits_for_account(), asi el numero que se ve es el mismo
+            # que decide.
+            price = _current_exit_price(p)
             if price is not None:
                 key = _position_key(p["ticker"], "option", od["expiration"], od["strike"], od["option_type"])
                 prices[key] = price
