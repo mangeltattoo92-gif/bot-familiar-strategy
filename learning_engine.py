@@ -52,6 +52,7 @@ NOTABLY_BETTER_WINRATE = 65.0  # por encima, con muestra suficiente, es un halla
 
 CONFIDENCE_RE = re.compile(r"confianza (alta|media|baja)")
 PNL_RE = re.compile(r"P&L ([+-]?[0-9.]+)%")
+EXIT_RULE_RE = re.compile(r"regla '(\w+)'")
 
 
 def _key(t: dict) -> tuple:
@@ -93,12 +94,19 @@ def collect_closed_trades() -> list[dict]:
                 if not m:
                     continue
                 conf_m = CONFIDENCE_RE.search(buy_t.get("reason") or "")
+                rule_m = EXIT_RULE_RE.search(t.get("reason") or "")
                 rows.append({
                     "username": username, "ticker": buy_t["ticker"],
                     "strategy": buy_t.get("entry_strategy") or "desconocida",
                     "confidence": conf_m.group(1) if conf_m else "desconocida",
                     "volatility_strength": buy_t.get("entry_volatility_strength") or "desconocida",
                     "hour_bucket": _hour_bucket(buy_t["timestamp"]),
+                    # 2026-09-16, a pedido del usuario ("hay que estudiarlo y
+                    # darle seguimiento") -- que regla de SALIDA cerro cada
+                    # operacion, para medir con el tiempo si reglas como
+                    # asegurar_porcion_del_pico (la nueva de hoy) realmente
+                    # mejoran el resultado a medida que se acumulan datos.
+                    "exit_rule": rule_m.group(1) if rule_m else "desconocida",
                     "pct": float(m.group(1)),
                     "entry_ts": buy_t["timestamp"], "exit_ts": t["timestamp"],
                 })
@@ -119,7 +127,13 @@ def _stats(rows: list[dict]) -> dict:
 
 def analyze(rows: list[dict]) -> dict:
     overall = _stats(rows)
-    dimensions = ["strategy", "confidence", "volatility_strength", "hour_bucket"]
+    dimensions = ["strategy", "confidence", "volatility_strength", "hour_bucket", "exit_rule"]
+    # exit_rule queda afuera de los hallazgos automaticos -- reglas como
+    # stop_loss/rechazo_de_ruptura SIEMPRE dan 0% de acierto por
+    # definicion (solo se disparan cuando ya hay perdida), no es un
+    # patron nuevo a reportar. Se guarda igual en "groups" para poder
+    # verla a mano (ej. seguirle la pista a asegurar_porcion_del_pico).
+    DIMENSIONS_FOR_FINDINGS = {"strategy", "confidence", "volatility_strength", "hour_bucket"}
     groups: dict[str, dict[str, dict]] = {}
     findings = []
 
@@ -130,7 +144,7 @@ def analyze(rows: list[dict]) -> dict:
             subset = [r for r in rows if r[dim] == val]
             stats = _stats(subset)
             groups[dim][val] = stats
-            if stats["n"] < MIN_SAMPLE:
+            if dim not in DIMENSIONS_FOR_FINDINGS or stats["n"] < MIN_SAMPLE:
                 continue
             if stats["win_rate"] <= NOTABLY_WORSE_WINRATE:
                 findings.append({
