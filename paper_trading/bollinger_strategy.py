@@ -1913,6 +1913,22 @@ PEAK_PROFIT_LOCK_PCT = 0.03      # a partir de +3% de pico visto, se protege esa
 # donde la banda ya se movio con la tendencia por otras razones.
 EARLY_REJECTION_WINDOW_MINUTES = 30
 
+# 2026-09-16, a pedido del usuario ("pudimos haberle ganado al menos el
+# 5%?"), caso real: MU llego a tener un pico de +6.74% de ganancia real
+# y se cayo del todo hasta -0.86% sin que NADA actuara en el camino --
+# PEAK_PROFIT_LOCK_PCT (arriba) solo protege una vez que la posicion YA
+# volvio a cero o menos, no mientras todavia queda algo positivo por
+# devolver. Esta regla es mas fina: a partir de un pico real de
+# TRAILING_GIVEBACK_THRESHOLD_PCT o mas, no se deja devolver mas de
+# TRAILING_GIVEBACK_FRACTION de ese pico -- asegura una porcion de la
+# ganancia vista, en vez de esperar a que se esfume toda. Con MU
+# (pico +6.74%) esta regla hubiera cerrado alrededor de +3.37% en vez
+# de -0.86%. Un solo caso real no alcanza para calibrar la fraccion con
+# precision -- 50% es un punto de partida razonable (proteger al menos
+# la mitad de lo que se vio), a revisar con mas datos.
+TRAILING_GIVEBACK_THRESHOLD_PCT = 0.05  # a partir de +5% de pico visto
+TRAILING_GIVEBACK_FRACTION = 0.5        # no se deja devolver mas de la mitad de ese pico
+
 
 def evaluate_open_position_exit(
     entry_premium: float,
@@ -1988,6 +2004,9 @@ def evaluate_open_position_exit(
         return {"should_close": True, "reason": "cierre_por_vencimiento", "pnl_pct": pnl_pct}
     if rejection_signal and pnl_pct <= 0 and minutes_since_entry <= EARLY_REJECTION_WINDOW_MINUTES:
         return {"should_close": True, "reason": "rechazo_de_ruptura", "pnl_pct": pnl_pct}
+    if (peak_pnl_pct is not None and peak_pnl_pct >= TRAILING_GIVEBACK_THRESHOLD_PCT
+            and pnl_pct <= peak_pnl_pct * TRAILING_GIVEBACK_FRACTION):
+        return {"should_close": True, "reason": "asegurar_porcion_del_pico", "pnl_pct": pnl_pct}
     if peak_pnl_pct is not None and peak_pnl_pct >= PEAK_PROFIT_LOCK_PCT and pnl_pct <= 0:
         return {"should_close": True, "reason": "proteger_pico_de_ganancia", "pnl_pct": pnl_pct}
     if technical_exit_signal and pnl_pct > 0:
