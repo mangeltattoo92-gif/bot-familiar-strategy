@@ -1896,6 +1896,23 @@ QUICK_PROFIT_MIN_MINUTES = 15    # esperar al menos 1 vela de 15m completa antes
 # lo que se pueda apenas cruce de vuelta por debajo de PEAK_PROFIT_LOCK_PCT.
 PEAK_PROFIT_LOCK_PCT = 0.03      # a partir de +3% de pico visto, se protege esa ganancia
 
+# 2026-09-16, a pedido del usuario ("chequear cualquier posible rechazo y
+# tomar ganancias antes de que se vaya en contra"), root-causado con MSFT:
+# perdio -21.53% sin que NINGUNA regla de arriba actuara, porque
+# technical_exit_signal (cross_above_mid/cross_below_mid) exige que el
+# precio cruce toda la banda MEDIA -- un viaje mucho mas largo. MSFT nunca
+# cruzo la media (495.54), pero SI volvio a cruzar por ENCIMA de la banda
+# inferior que habia roto al entrar (494.01) -- eso ya es un rechazo real
+# de la ruptura, mucho mas rapido de detectar. rejection_signal (calculado
+# por el llamador comparando el precio actual contra la banda que se
+# rompio al entrar, no la banda media) dispara este cierre temprano SOLO
+# si la posicion todavia no esta en ganancia (pnl_pct <= 0) -- si ya esta
+# en ganancia, no hace falta: la regla de pico de ganancia (arriba) ya
+# protege eso. Ventana acotada a los primeros
+# EARLY_REJECTION_WINDOW_MINUTES para no disparar en posiciones viejas
+# donde la banda ya se movio con la tendencia por otras razones.
+EARLY_REJECTION_WINDOW_MINUTES = 30
+
 
 def evaluate_open_position_exit(
     entry_premium: float,
@@ -1904,6 +1921,7 @@ def evaluate_open_position_exit(
     technical_exit_signal: bool,
     hourly_aligned: bool = True,
     force_eod_exit: bool = False,
+    rejection_signal: bool = False,
     stop_loss_pct: float = STOP_LOSS_PCT,
     minutes_since_entry: float = 0.0,
     quick_profit_pct: float = QUICK_PROFIT_PCT,
@@ -1924,28 +1942,36 @@ def evaluate_open_position_exit(
          con el riesgo que eso agrega (gaps fuera de horario, caida de la
          prima por el paso de los dias) a cambio de mas tiempo para
          alcanzar el objetivo. Ver INCIDENTS.md y CLAUDE.md.
-      4) Se vio un PICO de ganancia de al menos PEAK_PROFIT_LOCK_PCT en
+      4) rejection_signal=True (el precio volvio a cruzar hacia ADENTRO de
+         la banda que rompio al entrar -- no hace falta que cruce toda la
+         banda media, eso es mucho mas lento) Y la posicion todavia NO esta
+         en ganancia (pnl_pct <= 0) Y sigue dentro de los primeros
+         EARLY_REJECTION_WINDOW_MINUTES desde que entro -> cerrar YA. 2026-09-16,
+         a pedido del usuario ("chequear cualquier posible rechazo... antes
+         de que se vaya en contra"), caso real: MSFT perdio -21.53% sin que
+         ninguna otra regla actuara, porque nunca cruzo la banda media.
+      5) Se vio un PICO de ganancia de al menos PEAK_PROFIT_LOCK_PCT en
          algun momento de la posicion (peak_pnl_pct) Y la ganancia actual
          ya volvio a 0 o menos -> cerrar YA. 2026-09-15, a pedido del
          usuario: una posicion que llego a estar en ganancia real no debe
          terminar dando vuelta a perdida sin que se intente asegurar algo
          en el camino -- ver la nota junto a PEAK_PROFIT_LOCK_PCT arriba
          (caso real: HOOD).
-      5) Señal tecnica de reversion Y la posicion esta en ganancia (aunque
+      6) Señal tecnica de reversion Y la posicion esta en ganancia (aunque
          no haya llegado al objetivo) -> cerrar YA para proteger esa
          ganancia, en vez de esperar a que el mercado no llegue al objetivo
          por defecto y termine dando vuelta a perdida.
-      6) La tendencia de 1h NO respalda la direccion de la entrada
+      7) La tendencia de 1h NO respalda la direccion de la entrada
          (hourly_aligned=False) Y ya hay una ganancia razonable
          (>= EARLY_LOCK_WITHOUT_1H_SUPPORT_PCT) -> asegurarla ahora.
-      7) Ya paso al menos una vela de 15m completa (minutes_since_entry >=
+      8) Ya paso al menos una vela de 15m completa (minutes_since_entry >=
          QUICK_PROFIT_MIN_MINUTES) Y la ganancia ya es solida
          (>= quick_profit_pct) -> tomar la ganancia YA, sin esperar el
          objetivo completo. Prioriza velocidad: en 15m, una ganancia en
          mano vale mas que esperar horas por un objetivo mayor.
-      8) Si nada de lo anterior aplica -> mantener y dejar correr hacia el
+      9) Si nada de lo anterior aplica -> mantener y dejar correr hacia el
          objetivo completo (paso 1).
-      9) Señal tecnica de reversion pero la posicion sigue en perdida (no
+      10) Señal tecnica de reversion pero la posicion sigue en perdida (no
          llego al stop) -> NO se fuerza el cierre solo por la señal; el
          stop-loss sigue siendo el limite (evita salidas prematuras por
          ruido cuando ya se acepto ese riesgo al entrar).
@@ -1960,6 +1986,8 @@ def evaluate_open_position_exit(
         return {"should_close": True, "reason": "stop_loss", "pnl_pct": pnl_pct}
     if force_eod_exit:
         return {"should_close": True, "reason": "cierre_por_vencimiento", "pnl_pct": pnl_pct}
+    if rejection_signal and pnl_pct <= 0 and minutes_since_entry <= EARLY_REJECTION_WINDOW_MINUTES:
+        return {"should_close": True, "reason": "rechazo_de_ruptura", "pnl_pct": pnl_pct}
     if peak_pnl_pct is not None and peak_pnl_pct >= PEAK_PROFIT_LOCK_PCT and pnl_pct <= 0:
         return {"should_close": True, "reason": "proteger_pico_de_ganancia", "pnl_pct": pnl_pct}
     if technical_exit_signal and pnl_pct > 0:

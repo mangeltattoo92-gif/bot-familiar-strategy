@@ -219,12 +219,23 @@ def run_exits_for_account(username: str, db_path: Path) -> int:
         now_utc = datetime.now(timezone.utc)
         minutes_since_entry = (now_utc - opened).total_seconds() / 60
 
-        exit_signal, hourly_aligned = False, True
+        exit_signal, hourly_aligned, rejection_signal = False, True, False
         if p["asset_type"] == "option":
             try:
                 r = analyze(p["ticker"])
                 exit_signal = (r["exit_short_signal"] if p["option_details"]["option_type"] == "put"
                                 else r["exit_long_signal"])
+                # 2026-09-16, a pedido del usuario ("chequear cualquier
+                # posible rechazo... antes de que se vaya en contra") -- ver
+                # la nota larga junto a EARLY_REJECTION_WINDOW_MINUTES en
+                # bollinger_strategy.py. Mas rapido que exit_signal (que
+                # exige cruzar toda la banda media): alcanza con que el
+                # precio vuelva a cruzar hacia ADENTRO de la banda que
+                # rompio al entrar.
+                if p["option_details"]["option_type"] == "put":
+                    rejection_signal = r["last_close"] > r["lower_band"]
+                else:
+                    rejection_signal = r["last_close"] < r["upper_band"]
             except Exception:
                 exit_signal = False
             try:
@@ -257,7 +268,7 @@ def run_exits_for_account(username: str, db_path: Path) -> int:
             profit_target_pct=p["profit_target_pct"] or 0.10, technical_exit_signal=exit_signal,
             hourly_aligned=hourly_aligned, force_eod_exit=_is_near_expiration(p, now_utc),
             stop_loss_pct=p["stop_loss_pct"] or 0.20, minutes_since_entry=minutes_since_entry,
-            peak_pnl_pct=peak_pnl_pct,
+            peak_pnl_pct=peak_pnl_pct, rejection_signal=rejection_signal,
         )
         if result["should_close"]:
             reason = (f"[multi_user_entry -- cuenta {username}] Cierre automatico por regla "
