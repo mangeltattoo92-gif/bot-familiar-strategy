@@ -23,7 +23,7 @@ echo "=== $TIMESTAMP ===" >> "$LOG_FILE"
 claude -p "Hace una autopsia/peritaje PROFUNDO del sistema completo de Bot Familiar (produccion en este servidor + el piloto de dinero real). Objetivo: encontrar cualquier cosa que este mal o a punto de romperse ANTES de que se convierta en un apagon como los 2 que ya pasaron hoy (permiso de ejecucion perdido en un git pull, y file descriptors agotados en gunicorn).
 
 Revisa, en orden:
-1. Estado de los servicios: \`systemctl status bot-familiar-web bot-familiar-entries bot-familiar-proximity bot-familiar-watchdog --no-pager\`. Todos deben estar 'active (running)', sin reinicios sospechosos recientes.
+1. Estado de los servicios: \`systemctl status bot-familiar-web bot-familiar-entries bot-familiar-proximity bot-familiar-watchdog bot-familiar-exit-watch bot-familiar-shadow-stop bot-familiar-pilot-exit-watch --no-pager\`. Todos deben estar 'active (running)', sin reinicios sospechosos recientes. Los ultimos 3 son nuevos (2026-09-15): bot-familiar-exit-watch y bot-familiar-pilot-exit-watch revisan solo salidas cada 30s (deberian tener actividad reciente en /opt/bot-familiar/data/exit_watch_loop.log y /opt/bot-familiar-real-pilot/data/pilot_exit_watch_loop.log en horario de mercado); bot-familiar-shadow-stop es SOLO observacion (nunca cierra nada real), revisa que /opt/bot-familiar/data/shadow_stop_watch.json se siga actualizando.
 2. Salud HTTP real del panel: \`curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/login\` debe dar 200.
 3. Permisos de ejecucion de TODOS los scripts .sh en /opt/bot-familiar y /opt/bot-familiar-real-pilot (\`find /opt/bot-familiar /opt/bot-familiar-real-pilot -name '*.sh' -not -perm -u+x\` -- si esto devuelve algo, son scripts SIN permiso de ejecucion, hay que arreglarlos con chmod +x).
 4. File descriptors de gunicorn (\`ls /proc/<pid>/fd | wc -l\` contra el limite en \`/proc/<pid>/limits\` para cada worker de gunicorn) -- alerta si algun worker supera 40%.
@@ -31,6 +31,7 @@ Revisa, en orden:
 6. Estado de git en /opt/bot-familiar-real-pilot (\`git status\`, \`git log -1\`) -- si esta atras de origin/main, correr git pull. Si hay cambios locales sin commitear que no deberian estar ahi, reportalo, NO los descartes sin avisar.
 7. Espacio en disco (\`df -h /\`) -- alerta si supera 85% de uso.
 8. Cuentas activas en bot-familiar (via python: \`from webapp.auth import list_all_users; from paper_trading.engine import get_settings, get_status\` sobre cada cuenta activa) -- chequeo rapido de que bot_enabled este en el estado esperado y no haya un circuit breaker disparado sin que el usuario lo sepa.
+9. Motores diarios NUEVOS (2026-09-15): despues de las 13:25 UTC en un dia de mercado, /opt/bot-familiar/data/daily_market_bias.json y /opt/bot-familiar-real-pilot/data/daily_market_bias.json deben tener un 'updated_at' de HOY (revisa tambien daily_market_bias.log en ambas carpetas por si el cron fallo) -- es la primera corrida en vivo de este cron, prestale atencion especial hoy y mañana. Igual para daily_guide.json despues de las 09:00 UTC.
 
 Para cada problema que encuentres, clasificalo en DOS categorias:
 - MECANICO Y SEGURO de arreglar vos mismo AHORA (permiso de ejecucion faltante -> chmod +x; servicio caido o gunicorn con fd alto -> systemctl restart; repo atras de origin -> git pull): arreglalo y anotalo como reparacion.
