@@ -80,6 +80,8 @@ def main():
                 # las notas largas ahi para cada uno.
                 if r["strategy"] == "giro_sma20" and r["confidence"] != "alta":
                     continue
+                if r["strategy"] == "squeeze_breakout_temprano" and r["confidence"] != "alta":
+                    continue
                 if (r["strategy"] in ("squeeze_breakout", "squeeze_breakout_temprano")
                         and r.get("volatility_strength") != "extrema"):
                     continue

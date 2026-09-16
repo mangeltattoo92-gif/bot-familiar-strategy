@@ -410,6 +410,18 @@ def run_entry_cycle(accounts: list[tuple[str, Path]]) -> None:
             # descartarlo, pero si para pedir mas confirmacion.
             if r["strategy"] == "giro_sma20" and r["confidence"] != "alta":
                 continue
+            # 2026-09-16, a pedido del usuario ("necesitamos mas confianza"):
+            # squeeze_breakout_temprano (entra sobre una vela de 15m TODAVIA
+            # SIN CERRAR, para no perder tiempo) en confianza media salio
+            # 3/13 en el historial real (23.1% de acierto, -5.50% promedio)
+            # -- mucho peor que squeeze_breakout normal. Tiene sentido: actua
+            # sobre datos incompletos, mas propenso a revertirse antes de que
+            # la vela termine de cerrar (caso real hoy: SQQQ se revirtio en
+            # 31 segundos). Confianza alta todavia no tiene muestra (n=1),
+            # pero exigirla es la misma logica de graduar el riesgo que ya
+            # se aplica en giro_sma20.
+            if r["strategy"] == "squeeze_breakout_temprano" and r["confidence"] != "alta":
+                continue
             # 2026-09-15, mismo dia: MARA perdio -23.73% con volume_ratio de
             # apenas 1.19x ("regular", el umbral de "extrema" ya definido en
             # bollinger_strategy.STRONG_VOLUME_MULT es 2.0x). Separando el
