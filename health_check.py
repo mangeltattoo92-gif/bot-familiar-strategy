@@ -53,7 +53,7 @@ def _active_user_db_paths() -> list[tuple[str, Path]]:
     de entradas la creo por el -- nada que chequear ahi)."""
     out = []
     try:
-        users = list_all_users()
+        users = list_all_users(include_admin=True)
     except Exception:
         return out
     for u in users:

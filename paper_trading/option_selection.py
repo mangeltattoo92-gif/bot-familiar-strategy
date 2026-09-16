@@ -24,7 +24,11 @@ from paper_trading.nyse_calendar import is_trading_day
 from webapp.market_data import _option_row_price, _with_timeout
 
 TARGET_DELTA = 0.50
-DELTA_RANGE = (0.40, 0.60)  # mismo rango objetivo que la seleccion manual via MCP de Robinhood
+# 2026-09-15, a pedido explicito del usuario tras ver un contrato con
+# delta 0.67 (COIN, via el camino de respaldo): "los proximos contratos
+# van a tener un delta de 0.40 a 0.50, no mas que eso". Antes era
+# (0.40, 0.60).
+DELTA_RANGE = (0.40, 0.50)
 
 # Cuando ningun strike cae en DELTA_RANGE (strikes muy espaciados, tipico
 # de subyacentes baratos/poco liquidos como NIO), el fallback "mas
@@ -37,7 +41,10 @@ DELTA_RANGE = (0.40, 0.60)  # mismo rango objetivo que la seleccion manual via M
 # rango mas ancho -- fuera de esto, ni siquiera vale la pena el
 # "mejor disponible", se prefiere no entrar (a pedido explicito del
 # usuario tras revisar el caso).
-FALLBACK_DELTA_RANGE = (0.25, 0.75)
+# Tope superior tambien bajado a 0.50 el 2026-09-15 (misma instruccion
+# de arriba: "no mas que eso" -- ningun contrato, ni siquiera por
+# respaldo, debe superar delta 0.50). Antes (0.25, 0.75).
+FALLBACK_DELTA_RANGE = (0.25, 0.50)
 TARGET_BUSINESS_DAYS_OUT = 7
 RISK_FREE_RATE = 0.045  # aproximacion -- no vale la pena pagar una llamada de red extra por esto
 

@@ -128,9 +128,9 @@ def select_affordable_contract(
             # reportaba como si hubiera cumplido el rango objetivo. Ahora
             # el motivo refleja cual rango se uso de verdad.
             if primary.get("used_fallback_range"):
-                reason = "primario -- strikes espaciados, delta fuera de 0.40-0.60 pero dentro del respaldo 0.25-0.75 (mayor volumen de esos)"
+                reason = "primario -- strikes espaciados, delta fuera de 0.40-0.50 pero dentro del respaldo 0.25-0.50 (mayor volumen de esos)"
             else:
-                reason = "primario (mayor volumen en rango de delta 0.40-0.60)"
+                reason = "primario (mayor volumen en rango de delta 0.40-0.50)"
             return primary, reason, qty
 
     ticker = yf.Ticker(symbol)
