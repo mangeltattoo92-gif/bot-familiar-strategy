@@ -404,8 +404,19 @@ def analyze(symbol: str, interval: str = DEFAULT_INTERVAL, period: str = DEFAULT
     high_volume = enough_volume_data and last_volume > avg_volume
     strong_volume = enough_volume_data and volume_ratio >= STRONG_VOLUME_MULT
 
-    breakout_up = last_close > last_upper
-    breakout_down = last_close < last_lower
+    # 2026-09-16, a pedido del usuario tras MSFT (rompio la banda por
+    # apenas 0.032% y se revirtio en minutos, stop-loss -21.53%): el mismo
+    # filtro de margen que ya usa analyze_forming_bar()
+    # (EARLY_BREAKOUT_MARGIN_PCT, validado con backtest real -- ver la
+    # nota junto a esa constante) nunca se aplico aca, en la señal
+    # NORMAL de squeeze_breakout (solo en la variante "temprana"). Datos
+    # reales propios: separando las rupturas por margen, las de menos de
+    # 0.3% tuvieron 50% de acierto con perdidas grandes (AAPL -23.71%,
+    # MSFT -21.53%, MARA -23.73%, TSLA -25.00%), las de 0.3% o mas
+    # tuvieron 87.5% de acierto (unica perdida: HOOD -22.52%). Tocar
+    # apenas la banda ya no alcanza -- tiene que romperla con margen real.
+    breakout_up = last_close > last_upper * (1 + EARLY_BREAKOUT_MARGIN_PCT / 100)
+    breakout_down = last_close < last_lower * (1 - EARLY_BREAKOUT_MARGIN_PCT / 100)
     cross_below_mid = last_close < last_sma
     cross_above_mid = last_close > last_sma
 
