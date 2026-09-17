@@ -294,10 +294,27 @@ def is_near_session_close(ts: datetime, minutes_before: float = EOD_FORCE_CLOSE_
 
 def too_close_to_open_new_position(now: datetime | None = None) -> bool:
     """True si faltan <= NO_NEW_ENTRY_MINUTES_BEFORE_CLOSE minutos para el
-    cierre de la sesion (o si hoy no es dia de mercado) -- no se deben
-    abrir posiciones NUEVAS tan cerca del cierre (day trading, sin overnight)."""
+    cierre de la sesion, si el mercado NO esta abierto ahora mismo (antes
+    de la apertura, despues del cierre, fin de semana/feriado), o si hoy
+    no es dia de mercado -- no se deben abrir posiciones NUEVAS fuera de
+    la sesion real (day trading, sin overnight).
+
+    BUG REAL encontrado 2026-09-17 ("10 posiciones perdidas" a la
+    madrugada): esta funcion antes solo miraba "cuantos minutos faltan
+    para el cierre de HOY" -- a las 12:16am, matematicamente "faltan
+    ~943 minutos para las 4pm de hoy" (el cierre de HOY, no el de ayer),
+    asi que devolvia False (permitido) sin verificar nunca si el mercado
+    esta realmente abierto en este momento. Eso dejo pasar 10 entradas
+    reales de madrugada por cuenta (giro_sma20, con datos de una vela ya
+    cerrada de la sesion anterior) contra precios de fuera de horario sin
+    movimiento real -- todas perdedoras. Ver INCIDENTS.md."""
     now = now or datetime.now(MARKET_TZ)
-    return is_near_session_close(now, NO_NEW_ENTRY_MINUTES_BEFORE_CLOSE)
+    if is_near_session_close(now, NO_NEW_ENTRY_MINUTES_BEFORE_CLOSE):
+        return True
+    day = now.date()
+    if not is_trading_day(day):
+        return True
+    return not (MARKET_OPEN_BAR_TIME <= now.time() <= market_close_time(day))
 
 DEFAULT_INTERVAL = "15m"
 DEFAULT_PERIOD = "1mo"

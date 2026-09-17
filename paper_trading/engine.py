@@ -665,9 +665,11 @@ def _ensure_settings_table(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE settings ADD COLUMN sizing_mode TEXT NOT NULL DEFAULT 'manual'")
     row = conn.execute("SELECT 1 FROM settings WHERE id = 1").fetchone()
     if row is None:
+        # 2026-09-17, a pedido del usuario ("30 operaciones diarias y 1
+        # contrato por operacion hasta que ellos lo cambien"): antes 3.
         conn.execute(
             "INSERT INTO settings (id, contracts_per_trade, max_trades_per_day, watchlist, fast_watchlist, bot_enabled, updated_at) "
-            "VALUES (1, 1, 3, ?, ?, 1, ?)",
+            "VALUES (1, 1, 30, ?, ?, 1, ?)",
             (DEFAULT_WATCHLIST, DEFAULT_FAST_WATCHLIST, _now()),
         )
         conn.commit()
