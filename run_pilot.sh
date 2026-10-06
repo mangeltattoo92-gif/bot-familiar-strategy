@@ -19,8 +19,6 @@ set +a
 
 cd /opt/bot-familiar-real-pilot || exit 1
 
-git pull -q origin main >> "$LOG_FILE" 2>&1 || echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) -- git pull fallo, sigo con el codigo local" >> "$LOG_FILE"
-
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 START_EPOCH=$(date -u +%s)
 ./venv/bin/python3 pilot_cycle.py > cycle_result.json 2>> "$LOG_FILE" || { echo "$TIMESTAMP -- pilot_cycle fallo" >> "$LOG_FILE"; exit 1; }
