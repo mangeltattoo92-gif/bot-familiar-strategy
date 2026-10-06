@@ -97,7 +97,7 @@ def main():
         return
 
     trades_today = get_trades_count_today()
-    if trades_today >= settings["max_trades_per_day"]:
+    if not REAL_ORDERS_SWITCH.exists() and trades_today >= settings["max_trades_per_day"]:
         result["notes"].append(f"Limite diario de operaciones alcanzado ({trades_today}/{settings['max_trades_per_day']}).")
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
