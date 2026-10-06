@@ -59,6 +59,19 @@ def _real_buys_today() -> int:
     )
 
 
+def _real_symbols_bought_today() -> set[str]:
+    """Tickers con una compra real de hoy que no fue rechazada: no se vuelve a comprar el mismo ticker."""
+    if not REAL_ORDERS_FILE.exists():
+        return set()
+    today = datetime.now(timezone.utc).date().isoformat()
+    orders = json.loads(REAL_ORDERS_FILE.read_text(encoding="utf-8") or "[]")
+    return {
+        o["symbol"] for o in orders
+        if o.get("side") == "buy" and str(o.get("ts", "")).startswith(today)
+        and o.get("status") not in ("rejected", "cancelled", "failed")
+    }
+
+
 def _days_to_expiry(expiration: str) -> int:
     return (datetime.fromisoformat(expiration).date() - datetime.now(timezone.utc).date()).days
 
@@ -108,12 +121,13 @@ def main():
 
     all_symbols = list(dict.fromkeys(settings["watchlist"] + settings["fast_watchlist"]))
     open_tickers = {p["ticker"] for p in status["positions"]}
+    real_symbols_today = _real_symbols_bought_today()
     daily_bias = load_daily_market_bias()
     signals = []
     for symbol in all_symbols:
         try:
             for r in scan_all_signals(symbol):
-                if r["signal"] == "none" or r["confidence"] == "baja" or symbol in open_tickers:
+                if r["signal"] == "none" or r["confidence"] == "baja" or symbol in open_tickers or symbol in real_symbols_today:
                     continue
                 # 2026-09-15, mismos filtros que multi_user_entry.py -- ver
                 # las notas largas ahi para cada uno.
