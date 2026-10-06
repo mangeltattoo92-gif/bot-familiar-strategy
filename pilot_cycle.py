@@ -39,7 +39,7 @@ CONFIDENCE_ORDER = {"alta": 0, "media": 1, "baja": 2}
 # 2026-10-06, a pedido explicito del usuario para la cuenta real de $33:
 # limites duros sobre cada compra real -- prima maxima por contrato, dias
 # minimos hasta vencimiento y una sola orden por dia.
-REAL_MAX_PREMIUM_PER_CONTRACT = 10.0
+REAL_MAX_PREMIUM_PER_CONTRACT = 30.0
 REAL_MIN_DAYS_TO_EXPIRY = 7
 REAL_MAX_BUYS_PER_DAY = 1
 ROOT = Path(__file__).resolve().parent
