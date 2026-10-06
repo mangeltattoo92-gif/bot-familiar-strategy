@@ -31,6 +31,7 @@ El script hace el trabajo mecánico y devuelve un JSON con:
 5. Agregá una línea a `real_orders.json` (en /opt/bot-familiar-real-pilot, es una lista JSON): `{"side":"buy","ts":<ISO UTC>,"symbol","strike","expiration","option_type","option_id","order_id","ref_id","price","quantity":1,"status":"submitted"}`. Si la orden se rechaza, no la registres.
 6. Revisá el estado con `get_option_orders` (order_id). Si quedó `filled`, actualizá status a "filled". Si quedó rechazada o cancelada, actualizá a esa palabra y NO registres la entrada en papel.
 7. Solo si quedó `filled`, llamá a `record_trade()` de `paper_trading.engine` para reflejar la compra en la cuenta de papel, con los mismos datos y el ask real verificado.
+8. Inmediatamente después de confirmar la compra `filled`, dejá una venta límite automática al 10% por encima del precio de ejecución: `place_option_order` con legs `[{option_id, side:"sell", position_effect:"close"}]`, quantity "1", type "limit", price = precio de ejecución × 1,10 redondeado al tick, time_in_force "gtc", ref_id UUID nuevo. Guardá su order_id en `real_orders.json` como `target_order_id` de esa compra.
 
 ## Paso 2b -- Registro en papel cuando las órdenes reales están apagadas
 
@@ -41,7 +42,7 @@ Si `real_orders_enabled` es false y hay `new_signal`, llamá a `record_trade()` 
 Para cada entrada de `closed_positions`:
 1. Buscá en `real_orders.json` una compra `filled` con el mismo symbol, strike, expiration y option_type que no esté ya vendida.
 2. Si no hay ninguna, es una posición solo de papel: no vendas nada en Robinhood y decilo en el reporte.
-3. Si la hay y `real_orders_enabled` es true: mirá `get_option_quotes`. Si el bid es 0, no vendas: reportalo y dejalo para el próximo ciclo. Si hay bid, colocá `place_option_order` con legs `[{option_id, side:"sell", position_effect:"close"}]`, quantity "1", type "limit", price = bid + 0.35 × (ask − bid), redondeado al tick de Robinhood, time_in_force "gfd", ref_id UUID nuevo. Es el mismo precio límite que usa la cuenta simulada para vender.
+3. Si la hay y `real_orders_enabled` es true: primero revisá si su `target_order_id` (la venta al 10%) ya quedó `filled`. Si quedó filled, marcá la compra como "sold" y no hagas nada más. Si sigue abierta, cancelala con `cancel_option_order` antes de vender al bid. Luego mirá `get_option_quotes`. Si el bid es 0, no vendas: reportalo y dejalo para el próximo ciclo. Si hay bid, colocá `place_option_order` con legs `[{option_id, side:"sell", position_effect:"close"}]`, quantity "1", type "limit", price = bid + 0.35 × (ask − bid), redondeado al tick de Robinhood, time_in_force "gfd", ref_id UUID nuevo. Es el mismo precio límite que usa la cuenta simulada para vender.
 4. Actualizá en `real_orders.json` el status de esa compra a "sold" una vez que la venta quede `filled` (revisala con `get_option_orders`).
 5. Si `real_orders_enabled` es false, no vendas en Robinhood: decí que la posición real sigue abierta.
 
