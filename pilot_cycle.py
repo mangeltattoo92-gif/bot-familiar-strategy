@@ -52,7 +52,11 @@ def _real_buys_today() -> int:
         return 0
     today = datetime.now(timezone.utc).date().isoformat()
     orders = json.loads(REAL_ORDERS_FILE.read_text(encoding="utf-8") or "[]")
-    return sum(1 for o in orders if o.get("side") == "buy" and str(o.get("ts", "")).startswith(today))
+    return sum(
+        1 for o in orders
+        if o.get("side") == "buy" and str(o.get("ts", "")).startswith(today)
+        and o.get("status") not in ("rejected", "cancelled", "failed")
+    )
 
 
 def _days_to_expiry(expiration: str) -> int:
