@@ -18,6 +18,7 @@ Uso: ./venv/bin/python3 pilot_cycle.py
 """
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -35,17 +36,51 @@ from webapp import market_data
 
 CONFIDENCE_ORDER = {"alta": 0, "media": 1, "baja": 2}
 
+# 2026-10-06, a pedido explicito del usuario para la cuenta real de $33:
+# limites duros sobre cada compra real -- prima maxima por contrato, dias
+# minimos hasta vencimiento y una sola orden por dia.
+REAL_MAX_PREMIUM_PER_CONTRACT = 10.0
+REAL_MIN_DAYS_TO_EXPIRY = 7
+REAL_MAX_BUYS_PER_DAY = 1
+ROOT = Path(__file__).resolve().parent
+REAL_ORDERS_FILE = ROOT / "real_orders.json"
+REAL_ORDERS_SWITCH = ROOT / "REAL_ORDERS_ENABLED"
+
+
+def _real_buys_today() -> int:
+    if not REAL_ORDERS_FILE.exists():
+        return 0
+    today = datetime.now(timezone.utc).date().isoformat()
+    orders = json.loads(REAL_ORDERS_FILE.read_text(encoding="utf-8") or "[]")
+    return sum(1 for o in orders if o.get("side") == "buy" and str(o.get("ts", "")).startswith(today))
+
+
+def _days_to_expiry(expiration: str) -> int:
+    return (datetime.fromisoformat(expiration).date() - datetime.now(timezone.utc).date()).days
+
 
 def main():
-    result = {"closed_positions_count": 0, "new_signal": None, "circuit_breaker_active": False, "notes": []}
+    result = {
+        "closed_positions": [], "closed_positions_count": 0, "new_signal": None,
+        "circuit_breaker_active": False, "real_orders_enabled": REAL_ORDERS_SWITCH.exists(), "notes": [],
+    }
 
     # Pasos 1+2: cerrar posiciones que correspondan y chequear el
     # circuit breaker -- funcion REAL del proyecto, no reimplementada.
     # Lock compartido con exit_watch.py (2026-09-15, motor liviano de
     # solo-salidas cada 30s) para que nunca revisen/cierren la misma
     # posicion al mismo tiempo.
+    before = {p["key"]: p for p in get_status(db_path=DEFAULT_DB_PATH)["positions"]}
     with exits_critical_section():
         result["closed_positions_count"] = run_exits_for_account("piloto", DEFAULT_DB_PATH)
+    after_keys = {p["key"] for p in get_status(db_path=DEFAULT_DB_PATH)["positions"]}
+    for key, p in before.items():
+        if key not in after_keys:
+            result["closed_positions"].append({
+                "key": key, "ticker": p["ticker"], "asset_type": p["asset_type"],
+                "quantity": p["quantity"], "avg_cost": p["avg_cost"],
+                "option_details": p["option_details"],
+            })
 
     settings = get_settings()
     status = get_status()
@@ -82,8 +117,19 @@ def main():
                     continue
                 if r["strategy"] == "squeeze_breakout_temprano" and r["confidence"] != "alta":
                     continue
+                # 2026-10-02: auditoria real de operaciones ya ejecutadas
+                # (6 cuentas) encontro que confianza "media" perdio
+                # -$501.75 neto en agregado (n=47, 51% acierto) contra
+                # +$819.25 de "alta" (n=52, 67%) -- este script tenia su
+                # propio filtro de "volatilidad extrema" para
+                # squeeze_breakout, separado del requisito de confianza
+                # alta que ya se agrego en multi_user_entry.py. Se exigen
+                # AMBOS aca (el piloto es dinero real, criterio mas
+                # estricto que el sistema simulado).
                 if (r["strategy"] in ("squeeze_breakout", "squeeze_breakout_temprano")
                         and r.get("volatility_strength") != "extrema"):
+                    continue
+                if r["strategy"] == "squeeze_breakout" and r["confidence"] != "alta":
                     continue
                 ticker_bias = daily_bias.get(symbol)
                 wanted_bias = "alcista" if r["signal"] == "buy_call" else "bajista"
@@ -135,6 +181,20 @@ def main():
     )
     if contract is None or qty < 1:
         result["notes"].append(f"Señal en {top['symbol']} pero ningun contrato entra en el riesgo/cash disponible (liquidado) de la cuenta de papel.")
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    # Limites de la cuenta real: prima por contrato, dias hasta vencimiento
+    # y una sola compra por dia. Si no se cumplen, no se propone la senal.
+    real_limit_reason = None
+    if contract["ask"] * 100 > REAL_MAX_PREMIUM_PER_CONTRACT:
+        real_limit_reason = f"prima ${contract['ask'] * 100:.2f} supera el maximo de ${REAL_MAX_PREMIUM_PER_CONTRACT:.2f} por contrato"
+    elif _days_to_expiry(contract["expiration"]) < REAL_MIN_DAYS_TO_EXPIRY:
+        real_limit_reason = f"vence en menos de {REAL_MIN_DAYS_TO_EXPIRY} dias"
+    elif _real_buys_today() >= REAL_MAX_BUYS_PER_DAY:
+        real_limit_reason = f"ya hubo {REAL_MAX_BUYS_PER_DAY} compra(s) real(es) hoy"
+    if real_limit_reason:
+        result["notes"].append(f"Senal en {top['symbol']} descartada por limite de cuenta real: {real_limit_reason}.")
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 
