@@ -14,9 +14,9 @@ Estás en /opt/bot-familiar-real-pilot (venv en ./venv). Primero: `git pull`.
 
 ## Paso 1 -- Correr el ciclo determinístico
 
-Corré: `./venv/bin/python3 pilot_cycle.py`
+NO corras `pilot_cycle.py`: el lanzador ya lo corrió en este minuto y dejó su resultado en `cycle_result.json`. Leé ese archivo.
 
-El script hace el trabajo mecánico y devuelve un JSON con:
+El JSON tiene:
 - `closed_positions`: posiciones que el papel acaba de cerrar. Son las que hay que vender de verdad si tienen una compra real registrada (Paso 3).
 - `circuit_breaker_active`: si es true, no se buscan entradas nuevas.
 - `new_signal`: candidato de entrada, ya filtrado por los límites de la cuenta real (prima por contrato, días hasta vencimiento, una compra por día). Si es null, leé `notes` y terminá.
