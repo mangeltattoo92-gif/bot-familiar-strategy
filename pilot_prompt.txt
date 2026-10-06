@@ -46,6 +46,18 @@ Para cada entrada de `closed_positions`:
 4. Actualizá en `real_orders.json` el status de esa compra a "sold" una vez que la venta quede `filled` (revisala con `get_option_orders`).
 5. Si `real_orders_enabled` es false, no vendas en Robinhood: decí que la posición real sigue abierta.
 
+## Paso 3b -- Estado para el panel (SIEMPRE, al final de cada ciclo y después de cada orden)
+
+Escribí /opt/bot-familiar-real-pilot/real_state.json (JSON, sobrescribiendo) con:
+- `updated_at`: fecha y hora UTC actual.
+- `real_orders_enabled`: true o false.
+- `buying_power` y `total_value`: de `get_portfolio` (cuenta 812129864).
+- `open_positions`: de `get_option_positions` (cuenta 812129864, nonzero=true): ticker, tipo, strike, vencimiento, cantidad, precio promedio, valor actual.
+- `recent_orders`: de `get_option_orders` (cuenta 812129864, las últimas 20): ticker, lado, precio, cantidad, estado, fecha.
+- `last_cycle_notes`: las notas del ciclo de hoy, en una frase.
+
+Si alguna consulta falla, poné null en ese campo y decilo en `last_cycle_notes`. No inventes valores.
+
 ## Paso 4 -- Resumen final
 
 En español, corto: qué se cerró, qué se compró o vendió en Robinhood (ticker, strike, vencimiento, precio, estado de la orden), qué quedó sin ejecutar y por qué, y si las órdenes reales estaban encendidas. Si no pasó nada, una sola línea alcanza.
