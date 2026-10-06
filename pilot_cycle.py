@@ -198,6 +198,12 @@ def main():
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 
+    last_action = ROOT / "last_action.txt"
+    if last_action.exists() and datetime.now(timezone.utc).timestamp() - float(last_action.read_text().strip()) < 300:
+        result["notes"].append("Hubo una accion del agente hace menos de 5 minutos: no se propone una senal nueva hasta verificar el resultado.")
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
     result["new_signal"] = {
         "symbol": top["symbol"], "strategy": top["strategy"], "signal": top["signal"],
         "confidence": top["confidence"], "reason": top["reason"],
