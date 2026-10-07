@@ -34,6 +34,15 @@ class TradierClient:
         self.base = BASE_URLS[self.env]
         self.session = session or requests.Session()
 
+    @property
+    def data_delay_minutes(self) -> int:
+        """2026-10-07, confirmado por la propia documentacion de Tradier: en la
+        cuenta virtual (sandbox) las cotizaciones, la cadena de opciones y la
+        ejecucion de ordenes usan datos con 15 minutos de retraso. En la cuenta
+        real de corretaje (production) es en tiempo real. El motor de senales
+        NUNCA debe tratar datos de sandbox como si fueran en vivo."""
+        return 15 if self.env == "sandbox" else 0
+
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.token}", "Accept": "application/json"}
 
