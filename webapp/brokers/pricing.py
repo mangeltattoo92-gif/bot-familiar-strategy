@@ -46,22 +46,37 @@ def exit_limit(bid: float, ask: float) -> float:
     return max(round_to_tick(raw, "nearest"), bid)
 
 
-SANDBOX_PENDING_GRACE_MINUTES = 20
-"""2026-10-07, confirmado en vivo: en la cuenta virtual (sandbox) de Tradier las
-cotizaciones y la ejecucion de ordenes usan datos con 15 minutos de retraso (lo
-dice la propia documentacion del broker). Una orden recien colocada puede
-quedar en 'pending' sin que sea un error -- no avisar como fallo hasta que
-pasen SANDBOX_PENDING_GRACE_MINUTES. En la cuenta real de corretaje la
-ejecucion es en tiempo real, asi que esta espera no deberia aplicar ahi."""
+PENDING_GRACE_BUFFER_MINUTES = 5
+"""2026-10-07, confirmado en vivo: el retraso de datos de la cuenta (0 en
+production, 15 en sandbox -- ver TradierClient.data_delay_minutes) no es un
+numero fijo aparte, es la base real de cuanto puede tardar una orden en
+reflejarse. El margen de espera se calcula SIEMPRE a partir de ese retraso
+(delay + este buffer), nunca de un numero de minutos suelto -- asi, si
+Tradier cambia el retraso de sandbox algun dia, esta regla se ajusta sola
+en vez de quedar con un valor viejo hardcodeado."""
 
 
-def order_needs_attention(status: str, minutes_since_placed: float, env: str) -> bool:
-    """True si una orden pendiente ya tardo mas de lo esperado y hay que
-    avisar. env: 'sandbox' o 'production' (ver TradierClient.env)."""
+def order_needs_attention(status: str, minutes_since_placed: float, data_delay_minutes: int) -> bool:
+    """True si una orden pendiente ya tardo mas de lo esperado para ESTA
+    cuenta y hay que avisar. data_delay_minutes sale de client.data_delay_minutes
+    (0 en la cuenta real, 15 en la virtual)."""
     if status != "pending":
         return False
-    grace = SANDBOX_PENDING_GRACE_MINUTES if env == "sandbox" else 2
+    grace = data_delay_minutes + PENDING_GRACE_BUFFER_MINUTES
     return minutes_since_placed > grace
+
+
+def effective_window(data_delay_minutes: int, lookback_minutes: int, now: "datetime | None" = None) -> tuple[str, str]:
+    """Ventana (start, end) para pedir velas a timesales, ajustada al retraso
+    real de la cuenta. Pedir 'hasta ahora mismo' en una cuenta con retraso
+    devuelve vacio (confirmado en vivo) -- el fin de la ventana nunca pasa de
+    ahora menos el retraso. Formato 'YYYY-MM-DD HH:MM', el que pide Tradier."""
+    from datetime import datetime, timedelta, timezone
+    now = now or datetime.now(timezone.utc)
+    end = now - timedelta(minutes=data_delay_minutes)
+    start = end - timedelta(minutes=lookback_minutes)
+    fmt = "%Y-%m-%d %H:%M"
+    return start.strftime(fmt), end.strftime(fmt)
 
 
 def normalize_chain(raw_options: list[dict[str, Any]]) -> list[dict[str, Any]]:
