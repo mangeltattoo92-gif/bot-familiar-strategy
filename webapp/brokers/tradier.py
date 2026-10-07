@@ -64,27 +64,45 @@ class TradierClient:
     def order_status(self, account_id: str, order_id: int) -> dict:
         return self._get(f"/v1/accounts/{account_id}/orders/{order_id}")
 
-    def timesales(self, symbol: str, interval: str = "15min", start: str | None = None, end: str | None = None) -> dict:
-        """Velas intradia. Tradier solo da 1, 5 y 15 minutos; hasta 40 dias con sesion abierta."""
+    def cancel_order(self, account_id: str, order_id: int) -> dict:
+        r = self.session.delete(f"{self.base}/v1/accounts/{account_id}/orders/{order_id}",
+                                headers=self._headers(), timeout=TIMEOUT_SECONDS)
+        if r.status_code >= 400:
+            raise TradierError(f"DELETE orders/{order_id} -> {r.status_code}: {r.text[:200]}")
+        return r.json()
+
+    def timesales(self, symbol: str, start: str, end: str, interval: str = "15min") -> dict:
+        """Velas intradia. Tradier solo da 1, 5 y 15 minutos; hasta 40 dias con sesion abierta.
+
+        start/end son OBLIGATORIOS (formato 'YYYY-MM-DD HH:MM'): confirmado en vivo
+        2026-10-07 que sin fechas devuelve `series: null` cuando el dia todavia no
+        tiene datos (ej. antes de la apertura), no una lista vacia."""
         if interval not in ("1min", "5min", "15min"):
             raise ValueError("interval debe ser 1min, 5min o 15min")
-        params = {"symbol": symbol, "interval": interval, "session_filter": "open"}
-        if start:
-            params["start"] = start
-        if end:
-            params["end"] = end
+        params = {"symbol": symbol, "interval": interval, "session_filter": "open", "start": start, "end": end}
         return self._get("/v1/markets/timesales", params)
 
-    def option_chain(self, underlying: str, expiration: str) -> dict:
+    def option_chain(self, underlying: str, expiration: str, greeks: bool = False) -> dict:
         """Contratos de un vencimiento con bid, ask, volumen e interes abierto."""
-        return self._get("/v1/markets/options/chains", {"symbol": underlying, "expiration": expiration})
+        params = {"symbol": underlying, "expiration": expiration}
+        if greeks:
+            params["greeks"] = "true"
+        return self._get("/v1/markets/options/chains", params)
 
-    def place_oco(self, account_id: str, legs: list[dict[str, Any]], duration: str = "gtc") -> dict:
-        """Orden OCO para salir de una posicion: meta (limit) y stop, una cancela a la otra."""
-        data: dict[str, Any] = {"class": "oco", "duration": duration}
+    def place_oco(self, account_id: str, legs: list[dict[str, Any]], duration: str = "gtc",
+                 preview: bool = False) -> dict:
+        """Orden OCO para salir de una posicion: meta (limit) y stop, una cancela a la otra.
+
+        Formato confirmado en vivo 2026-10-07: NO es legs[i][campo] (eso da
+        'Invalid parameter, type: is not valid.' con 400). Tradier usa el indice
+        al FINAL del nombre de cada campo: option_symbol[i], side[i], quantity[i],
+        type[i], price[i]/stop[i] -- sin 'legs' envolviendo nada."""
+        data: dict[str, Any] = {"class": "oco", "duration": duration, "preview": "true" if preview else "false"}
         for i, leg in enumerate(legs):
             for key, value in leg.items():
-                data[f"legs[{i}][{key}]"] = value
+                if key == "duration":
+                    continue  # la duration va una sola vez, a nivel del pedido entero
+                data[f"{key}[{i}]"] = value
         return self._post(f"/v1/accounts/{account_id}/orders", data)
 
     def preview_option_order(self, account_id: str, option_symbol: str, underlying: str, side: str,

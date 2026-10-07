@@ -46,6 +46,55 @@ def exit_limit(bid: float, ask: float) -> float:
     return max(round_to_tick(raw, "nearest"), bid)
 
 
+SANDBOX_PENDING_GRACE_MINUTES = 20
+"""2026-10-07, confirmado en vivo: en la cuenta virtual (sandbox) de Tradier las
+cotizaciones y la ejecucion de ordenes usan datos con 15 minutos de retraso (lo
+dice la propia documentacion del broker). Una orden recien colocada puede
+quedar en 'pending' sin que sea un error -- no avisar como fallo hasta que
+pasen SANDBOX_PENDING_GRACE_MINUTES. En la cuenta real de corretaje la
+ejecucion es en tiempo real, asi que esta espera no deberia aplicar ahi."""
+
+
+def order_needs_attention(status: str, minutes_since_placed: float, env: str) -> bool:
+    """True si una orden pendiente ya tardo mas de lo esperado y hay que
+    avisar. env: 'sandbox' o 'production' (ver TradierClient.env)."""
+    if status != "pending":
+        return False
+    grace = SANDBOX_PENDING_GRACE_MINUTES if env == "sandbox" else 2
+    return minutes_since_placed > grace
+
+
+def normalize_chain(raw_options: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convierte las filas de /v1/markets/options/chains al formato que espera
+    select_contract. Confirmado en vivo 2026-10-07: el campo de vencimiento de
+    Tradier es 'expiration_date', no 'expiration'."""
+    out = []
+    for row in raw_options:
+        out.append({
+            "option_type": row.get("option_type"),
+            "strike": row.get("strike"),
+            "bid": row.get("bid"),
+            "ask": row.get("ask"),
+            "volume": row.get("volume"),
+            "open_interest": row.get("open_interest"),
+            "expiration": row.get("expiration_date"),
+            "symbol": row.get("symbol"),
+        })
+    return out
+
+
+def normalize_positions(raw: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Tradier devuelve {'positions': 'null'} (string literal) cuando la cuenta
+    no tiene posiciones, no una lista vacia. Confirmado en vivo 2026-10-07."""
+    positions = (raw or {}).get("positions")
+    if positions in (None, "null"):
+        return []
+    inner = positions.get("position") if isinstance(positions, dict) else None
+    if inner is None:
+        return []
+    return inner if isinstance(inner, list) else [inner]
+
+
 def select_contract(
     chain: list[dict[str, Any]],
     spot: float,
