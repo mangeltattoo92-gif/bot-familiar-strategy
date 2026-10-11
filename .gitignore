@@ -5,7 +5,12 @@ __pycache__/
 *.pyc
 venv/
 *.log
+*.log.*
 *.lock
+*.db
+*.db-journal
+*.pdf
+*.gz
 .env
 *.env
 
