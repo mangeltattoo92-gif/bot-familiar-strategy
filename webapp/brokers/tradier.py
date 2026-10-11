@@ -98,6 +98,10 @@ class TradierClient:
             params["greeks"] = "true"
         return self._get("/v1/markets/options/chains", params)
 
+    def expirations(self, underlying: str) -> dict:
+        """Fechas de vencimiento disponibles para un subyacente."""
+        return self._get("/v1/markets/options/expirations", {"symbol": underlying})
+
     def place_oco(self, account_id: str, legs: list[dict[str, Any]], duration: str = "gtc",
                  preview: bool = False) -> dict:
         """Orden OCO para salir de una posicion: meta (limit) y stop, una cancela a la otra.

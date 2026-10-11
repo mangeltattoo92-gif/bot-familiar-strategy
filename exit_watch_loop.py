@@ -32,7 +32,7 @@ def _log(msg: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Loop externo de ciclos frescos para exit_watch.py")
-    parser.add_argument("--interval", type=int, default=30)
+    parser.add_argument("--interval", type=int, default=15)  # ver nota 2026-09-17 en exit_watch.py
     args = parser.parse_args()
 
     acquire_single_instance_lock("exit_watch_loop")
@@ -56,7 +56,7 @@ def _run_once_cycle() -> None:
         _log(f"[loop] ERROR lanzando exit_watch.py --once: {e}")
         return
     try:
-        returncode = proc.wait(timeout=25)
+        returncode = proc.wait(timeout=12)  # proporcional al nuevo --interval 15 (antes 25/30)
         if returncode != 0:
             _log(f"[loop] exit_watch.py --once termino con codigo {returncode}.")
     except subprocess.TimeoutExpired:

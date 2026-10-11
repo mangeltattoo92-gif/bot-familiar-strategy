@@ -34,6 +34,9 @@
     </div>
     <nav class="topnav">
       <a href="#resumen" data-target="resumen" class="active">Resumen</a>
+      {% if is_admin %}
+      <a href="{{ url_for('admin_panel') }}" style="font-weight:700; color: var(--accent);">Mi panel de administrador</a>
+      {% endif %}
       <div class="nav-dropdown" id="nav-dropdown">
         <button class="nav-dropdown-btn" id="nav-dropdown-btn" type="button" aria-haspopup="true" aria-expanded="false">
           <span id="nav-dropdown-label">Más</span>
@@ -45,9 +48,6 @@
           <a href="#mercado" data-target="mercado">Mercado</a>
           {% if brand_space != 'familiar' %}
           <a href="{{ url_for('subscription') }}">Mi suscripción</a>
-          {% endif %}
-          {% if is_admin %}
-          <a href="{{ url_for('admin_panel') }}" style="font-weight:700;">Mi panel de administrador</a>
           {% endif %}
         </div>
       </div>
@@ -95,12 +95,79 @@
       </div>
     </section>
 
+    {% if pro_activated %}
+    <p class="muted small" id="pro-activated-note" style="color: var(--green); border: 1px solid var(--green); border-radius: var(--radius-md); padding: 0.6rem 0.9rem; background: var(--green-soft);">
+      ¡Listo! Tu pago se procesó y Metabot Pro ya está activo.
+    </p>
+    {% endif %}
+
+    {% if tradier_active %}
+    <p class="muted small" id="tradier-source-note">
+      <span class="status-pill on"><span class="dot"></span>Tradier</span>
+      Esta cuenta opera con datos reales de Tradier (sandbox, ~15 min de retraso) en vez de Yahoo Finance.
+    </p>
+    {% endif %}
+
+    {% if trial_deadline %}
+    <p class="muted small" id="trial-countdown-note" data-deadline="{{ trial_deadline }}" hidden
+       style="color: var(--amber); border: 1px solid var(--amber); border-radius: var(--radius-md); padding: 0.6rem 0.9rem; background: color-mix(in srgb, var(--amber) 12%, transparent);">
+      ⏳ Te quedan <strong id="trial-countdown-value">—</strong> para activar Metabot Pro antes de que tu cuenta se desactive automáticamente.
+      <a href="{{ url_for('subscription') }}" style="text-decoration:underline; font-weight:600;">Suscribirme ahora</a>
+    </p>
+    {% endif %}
+
     {% if brand_space != 'familiar' and not can_operate %}
     <section class="panel" id="pro-required-notice">
       <div class="panel-head"><h2>Activá Metabot Pro para operar</h2></div>
       <p class="muted">Tu cuenta puede ver el panel, pero el bot solo abre operaciones nuevas en cuentas con Metabot Pro activo. Si ya tenés posiciones abiertas, se siguen cerrando normalmente.</p>
       <a class="btn-approve" href="{{ url_for('subscription') }}" style="display:inline-block; text-decoration:none; margin-top:0.6rem;">Ver planes</a>
     </section>
+    {% endif %}
+
+    {% if can_operate %}
+      {% if not signed_terms %}
+      <section class="panel" id="terms-required-notice">
+        <div class="panel-head"><h2>Falta un paso: firmar los Términos</h2></div>
+        <p class="muted">Antes de conectar tu broker tenés que leer y firmar los Términos y Condiciones vigentes.</p>
+        <a class="btn-approve" href="{{ url_for('sign_terms', next=('privado' if brand_space == 'familiar' else 'pro')) }}" style="display:inline-block; text-decoration:none; margin-top:0.6rem;">Firmar Términos</a>
+      </section>
+      {% else %}
+      <section class="panel" id="broker-section">
+        <div class="panel-head"><h2>Conectar mi broker</h2></div>
+        <p class="muted small" style="margin-top:0;">Podés conectar tu cuenta de Tradier en modo Sandbox (práctica — el bot opera con datos de mercado reales pero capital simulado) y, por separado, tu cuenta de Producción para cuando decidas operar con dinero real. El token de cada una se genera vos mismo desde tradier.com, sección API Access — Metabot nunca te pide tu contraseña de Tradier. Se guardan cifrados; solo vos y el administrador pueden ver que están conectados, nadie más puede leer tus tokens.</p>
+
+        <div class="broker-slot" data-env="paper" style="margin-top:1rem; padding-top:1rem; border-top:1px dashed var(--border);">
+          <h3 style="font-size:0.9rem; margin:0 0 0.5rem;">Sandbox (práctica / virtual)</h3>
+          <div class="broker-connected-view" hidden>
+            <p><span class="status-pill on"><span class="dot"></span>Conectado</span> — cuenta <strong class="broker-account-id">—</strong></p>
+            <button class="btn-danger broker-disconnect-btn" type="button">Desconectar</button>
+          </div>
+          <div class="broker-connect-view">
+            <input type="password" class="text-input broker-token-input" style="width:100%;" autocomplete="off" placeholder="Tu token de Tradier (sandbox)">
+            <p class="settings-error broker-error" hidden></p>
+            <button class="btn-secondary broker-connect-btn" type="button" style="margin-top:0.6rem;">Conectar sandbox</button>
+          </div>
+        </div>
+
+        <div class="broker-slot" data-env="live" style="margin-top:1rem; padding-top:1rem; border-top:1px dashed var(--border);">
+          <h3 style="font-size:0.9rem; margin:0 0 0.5rem;">Producción (cuenta real)</h3>
+          <div class="broker-connected-view" hidden>
+            <p><span class="status-pill on"><span class="dot"></span>Conectado</span> — cuenta <strong class="broker-account-id">—</strong></p>
+            <div class="danger-zone" style="border-top:1px dashed var(--border); margin-top:0.8rem; padding-top:0.8rem;">
+              <p class="danger-zone-title broker-live-label" style="color:var(--amber);">Operar con dinero real: apagado</p>
+              <p class="muted small">Una vez activado, el bot abre y cierra posiciones de verdad en tu cuenta de Tradier, con tu dinero real. Podés apagarlo en cualquier momento. Mientras esté encendido, tu cuenta simulada (sandbox o paper money) se pausa — nunca operan las dos a la vez.</p>
+              <button class="btn-secondary broker-live-toggle-btn" type="button">Activar operar con dinero real</button>
+            </div>
+            <button class="btn-danger broker-disconnect-btn" type="button" style="margin-top:0.8rem;">Desconectar</button>
+          </div>
+          <div class="broker-connect-view">
+            <input type="password" class="text-input broker-token-input" style="width:100%;" autocomplete="off" placeholder="Tu token de Tradier (producción)">
+            <p class="settings-error broker-error" hidden></p>
+            <button class="btn-secondary broker-connect-btn" type="button" style="margin-top:0.6rem;">Conectar producción</button>
+          </div>
+        </div>
+      </section>
+      {% endif %}
     {% endif %}
 
 
@@ -547,5 +614,191 @@
   </div>
 
   <script src="{{ asset_url('js/dashboard.js') }}"></script>
+  <script>
+    // 2026-10-11, a pedido explicito ("el aviso de subscripcion antes de
+    // los 5 dias tiene que estar en la plataforma de usuario y con un
+    // conteo regresivo visible"): trial_deadline es activated_at + 7
+    // dias (server-side, ver app.py _trial_deadline_for -- None si ya es
+    // Pro, admin, o Bot Familiar). Se muestra SOLO en los ultimos 2 dias
+    // (a partir del dia 5), con un reloj que se actualiza cada segundo.
+    // Si el usuario paga Pro, plan deja de ser 'free' y este bloque ni
+    // se renderiza la proxima vez que cargue la pagina -- el aviso
+    // desaparece solo, sin tocar nada aca.
+    (function () {
+      const note = document.getElementById("trial-countdown-note");
+      if (note) {
+        const deadline = new Date(note.dataset.deadline).getTime();
+        const warnFrom = 2 * 24 * 60 * 60 * 1000; // ultimos 2 dias (TRIAL_DAYS - TRIAL_WARNING_DAYS)
+        const valueEl = document.getElementById("trial-countdown-value");
+        const tick = () => {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0 || remaining > warnFrom) {
+            note.hidden = true;
+            return;
+          }
+          note.hidden = false;
+          const totalSeconds = Math.floor(remaining / 1000);
+          const days = Math.floor(totalSeconds / 86400);
+          const hours = Math.floor((totalSeconds % 86400) / 3600);
+          const minutes = Math.floor((totalSeconds % 3600) / 60);
+          valueEl.textContent = days > 0
+            ? `${days} día${days === 1 ? "" : "s"} y ${hours} hora${hours === 1 ? "" : "s"}`
+            : `${hours} hora${hours === 1 ? "" : "s"} y ${minutes} minuto${minutes === 1 ? "" : "s"}`;
+        };
+        tick();
+        setInterval(tick, 30000);
+      }
+    })();
+
+    // 2026-10-11, a pedido explicito ("ya todos tienen que tener todas
+    // las correcones... pertenecer a tradier"): mismo conector de broker
+    // de dos slots (sandbox/produccion) que ya existe en "Mi suscripcion",
+    // ahora tambien directo en el panel principal -- aplica tanto a
+    // Metabot Pro como al plan privado (Bot Familiar), gateado arriba
+    // por can_operate + signed_terms, nunca por brand_space.
+    const brokerSlots = document.querySelectorAll(".broker-slot");
+
+    function wireBrokerSlot(slot) {
+      const env = slot.dataset.env; // "paper" o "live"
+      const connectedView = slot.querySelector(".broker-connected-view");
+      const connectView = slot.querySelector(".broker-connect-view");
+      const accountIdEl = slot.querySelector(".broker-account-id");
+      const tokenInput = slot.querySelector(".broker-token-input");
+      const errorEl = slot.querySelector(".broker-error");
+      const connectBtn = slot.querySelector(".broker-connect-btn");
+      const disconnectBtn = slot.querySelector(".broker-disconnect-btn");
+      const liveLabel = slot.querySelector(".broker-live-label");
+      const liveToggleBtn = slot.querySelector(".broker-live-toggle-btn");
+      let activeConnectionId = null;
+      let liveEnabled = false;
+
+      function renderLiveState() {
+        if (!liveLabel || !liveToggleBtn) return;
+        if (liveEnabled) {
+          liveLabel.textContent = "Operar con dinero real: encendido";
+          liveLabel.style.color = "var(--green)";
+          liveToggleBtn.textContent = "Apagar operar con dinero real";
+          liveToggleBtn.className = "btn-danger broker-live-toggle-btn";
+        } else {
+          liveLabel.textContent = "Operar con dinero real: apagado";
+          liveLabel.style.color = "var(--amber)";
+          liveToggleBtn.textContent = "Activar operar con dinero real";
+          liveToggleBtn.className = "btn-secondary broker-live-toggle-btn";
+        }
+      }
+
+      function render(active) {
+        if (active) {
+          activeConnectionId = active.id;
+          accountIdEl.textContent = active.account_id;
+          liveEnabled = !!active.live_trading_enabled;
+          renderLiveState();
+          connectedView.hidden = false;
+          connectView.hidden = true;
+        } else {
+          activeConnectionId = null;
+          connectedView.hidden = true;
+          connectView.hidden = false;
+        }
+      }
+
+      if (connectBtn) {
+        connectBtn.addEventListener("click", async () => {
+          const token = tokenInput.value.trim();
+          if (!token) {
+            errorEl.textContent = "Pegá tu token de Tradier primero.";
+            errorEl.hidden = false;
+            return;
+          }
+          errorEl.hidden = true;
+          connectBtn.disabled = true;
+          const originalLabel = connectBtn.textContent;
+          connectBtn.textContent = "Conectando...";
+          try {
+            const res = await fetch("/api/broker/connect", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token, env: env === "live" ? "production" : "sandbox" }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+              errorEl.textContent = data.error || "No se pudo conectar.";
+              errorEl.hidden = false;
+            } else {
+              await refreshAllSlots();
+            }
+          } catch (e) {
+            errorEl.textContent = "Error de red al intentar conectar.";
+            errorEl.hidden = false;
+          } finally {
+            connectBtn.disabled = false;
+            connectBtn.textContent = originalLabel;
+          }
+        });
+      }
+
+      if (disconnectBtn) {
+        disconnectBtn.addEventListener("click", async () => {
+          if (activeConnectionId == null) return;
+          if (!confirm("¿Desconectar esta cuenta de Tradier? Se apaga también \"operar con dinero real\" si estaba encendido.")) return;
+          disconnectBtn.disabled = true;
+          try {
+            await fetch("/api/broker/disconnect", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ connection_id: activeConnectionId }),
+            });
+            await refreshAllSlots();
+          } finally {
+            disconnectBtn.disabled = false;
+          }
+        });
+      }
+
+      if (liveToggleBtn) {
+        liveToggleBtn.addEventListener("click", async () => {
+          if (activeConnectionId == null) return;
+          const next = !liveEnabled;
+          const msg = next
+            ? "¿Activar operar con dinero real? El bot va a abrir y cerrar posiciones de verdad en tu cuenta de Tradier, con tu dinero real -- y tu cuenta simulada (sandbox o paper money) se PAUSA mientras tanto, nunca van a operar las dos a la vez."
+            : "¿Volver a tu cuenta simulada? Se apaga el dinero real -- el bot deja de operar en tu cuenta de Tradier y vuelve a operar solo con capital virtual.";
+          if (!confirm(msg)) return;
+          liveToggleBtn.disabled = true;
+          try {
+            const res = await fetch("/api/broker/live-trading", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ connection_id: activeConnectionId, enabled: next }),
+            });
+            const data = await res.json();
+            if (res.ok && data.ok) {
+              liveEnabled = data.enabled;
+              renderLiveState();
+            }
+          } finally {
+            liveToggleBtn.disabled = false;
+          }
+        });
+      }
+
+      return { env, render };
+    }
+
+    const brokerSlotHandles = Array.from(brokerSlots).map(wireBrokerSlot);
+
+    async function refreshAllSlots() {
+      let data = null;
+      try {
+        const res = await fetch("/api/broker/status");
+        if (res.ok) data = await res.json();
+      } catch (e) { /* red caida -- cada slot se queda en su vista de conectar */ }
+      const connections = (data && data.connections) || [];
+      brokerSlotHandles.forEach((handle) => {
+        const active = connections.find((c) => c.status === "active" && c.env === handle.env);
+        handle.render(active || null);
+      });
+    }
+    if (brokerSlotHandles.length) refreshAllSlots();
+  </script>
 </body>
 </html>

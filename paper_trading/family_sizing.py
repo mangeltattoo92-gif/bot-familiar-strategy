@@ -34,9 +34,23 @@ from paper_trading.option_selection import (
     TARGET_DELTA,
     _bs_delta,
     _nearest_business_day_expiration,
+    get_expiration_and_chain,
     select_contract,
 )
 from webapp.market_data import _option_row_price, _with_timeout
+
+# 2026-09-21, a pedido explicito del usuario ("no quiero que use un contrato mas
+# barato si no hay capital suficiente; que haga las entradas en las companias
+# que su capital le permita operar"; "si compra contratos mas baratos lo mas
+# probable es que el delta y el theta le choquen, no obtenga la ganancia
+# estimada y no tenga volumen suficiente"): si una cuenta no puede pagar el
+# contrato estandar (primario) de un ticker, select_affordable_contract() ya NO
+# baja a un contrato mas barato de ese mismo ticker -- devuelve
+# (None, "capital_insuficiente", 0) y el ciclo pasa a la siguiente señal, o sea
+# la cuenta entra solo en las empresas cuyo contrato estandar SI puede pagar.
+# Historial real antes del cambio: 3 de 240 entradas usaron ese respaldo
+# (SPY 9/14 y dos de demo_familiar). True devuelve el comportamiento anterior.
+ALLOW_CHEAPER_CONTRACT_FALLBACK = False
 
 
 def compute_quantity_from_risk(
@@ -63,29 +77,75 @@ def compute_quantity_from_risk(
     return min(by_risk, by_cash)
 
 
+# Techo de seguridad para el modo MANUAL -- 2026-09-18, caso real MU: con
+# la accion en ~$993, un solo contrato ATM costo $2,445 (~25% de una cuenta
+# de ~$9,800) porque el modo manual (ver docstring de compute_quantity_fixed)
+# solo miraba el cash disponible, nunca el tamaño de la cuenta. El usuario
+# eligio manual para controlar CUANTOS contratos, no para aceptar cualquier
+# costo por contrato segun que tan cara este la accion subyacente ese dia.
+# Este techo es independiente del risk_pct_per_trade configurado (ese sigue
+# ignorado en modo manual, a proposito) -- es solo una red de seguridad
+# contra subyacentes desproporcionadamente caros.
+# Bajado a 0.025 el 2026-09-29, a pedido del usuario ("hacer mas eficiente
+# las estrategias"): Criterio de Kelly con datos reales (381 cierres, 14
+# dias) -- p(ganar)=70.9%, ganador promedio $32.1, perdedor promedio
+# $72.4, b=0.443 -> Kelly completo = 5.2% del capital por operacion,
+# Kelly fraccionado (1/4 a 1/2, el que usan los profesionales de verdad
+# para no asumir el riesgo de ruina de un Kelly completo) = 1.3%-2.6%.
+# El 10% anterior era casi 2x el Kelly completo y hasta 8x el fraccionado
+# -- apostar mas del tamaño de Kelly no mejora el crecimiento a largo
+# plazo, lo empeora (mas varianza sin mas ganancia esperada, por el
+# efecto multiplicativo del interes compuesto). El usuario eligio 0.03
+# (un poco por encima del extremo superior del rango fraccionado
+# recomendado de 1.3%-2.6%, pero todavia bien por debajo del Kelly
+# completo de 5.2% -- decision suya de cuanto riesgo tomar dentro de un
+# rango matematicamente razonable). Para REVERTIR: volver a 0.10 y
+# reiniciar bot-familiar-entries.
+MAX_MANUAL_CONTRACT_PCT_OF_ACCOUNT = 0.03
+
+
 def compute_quantity_fixed(fixed_contracts: int, contract_price: float, available_cash: float,
-                            multiplier: float = 100.0) -> int:
+                            multiplier: float = 100.0, account_value: float | None = None) -> int:
     """Modo MANUAL (2026-09-14, a pedido del usuario -- alternativa al
     modo automatico por riesgo de arriba): compra siempre `fixed_contracts`
     contratos, sin mirar el % de riesgo -- el UNICO limite que se respeta
-    siempre es el cash disponible (nunca se gasta mas de lo que hay)."""
+    siempre es el cash disponible (nunca se gasta mas de lo que hay).
+
+    2026-09-18: se agrego un segundo limite, MAX_MANUAL_CONTRACT_PCT_OF_ACCOUNT,
+    para que un solo contrato no pueda comerse una porcion desproporcionada
+    de la cuenta cuando el subyacente esta muy caro (ver nota arriba). Si ni
+    1 contrato entra bajo ese techo, no se fuerza la operacion -- misma
+    mentalidad que el modo automatico: mejor no operar."""
     if contract_price <= 0 or multiplier <= 0 or fixed_contracts < 1:
         return 0
     cost_per_contract = contract_price * multiplier
     by_cash = int(available_cash // cost_per_contract)
-    return min(fixed_contracts, by_cash)
+    qty = min(fixed_contracts, by_cash)
+    if account_value is not None and account_value > 0:
+        max_cost = account_value * MAX_MANUAL_CONTRACT_PCT_OF_ACCOUNT
+        if cost_per_contract > max_cost:
+            return 0
+    return qty
 
 
 def compute_quantity(
     sizing_mode: str, account_value: float, risk_pct: float, fixed_contracts: int,
     contract_price: float, available_cash: float, multiplier: float = 100.0,
 ) -> int:
-    """Punto unico de entrada para dimensionar una compra -- elige entre
-    los dos modos segun `sizing_mode` ('auto' | 'manual', ver
-    settings['sizing_mode'])."""
-    if sizing_mode == "manual":
-        return compute_quantity_fixed(fixed_contracts, contract_price, available_cash, multiplier)
-    return compute_quantity_from_risk(account_value, risk_pct, contract_price, available_cash, multiplier)
+    """Punto unico de entrada para dimensionar una compra.
+
+    2026-09-28, a pedido del usuario ("eliminalo de la faz de la tierra"
+    sobre el modo automatico, dicho semanas atras; hoy "quita los 4 puntos
+    que encontraste" lo confirma): el modo 'auto' (compute_quantity_from_risk)
+    ya no es alcanzable desde aca -- las 7 cuentas activas estaban en
+    'manual' de todas formas (verificado antes de este cambio). Se ignora
+    `sizing_mode` a proposito y siempre se usa manual/fijo. La funcion
+    compute_quantity_from_risk() queda definida arriba pero sin ningun
+    llamador real, por si hace falta revisarla despues -- no se borro el
+    codigo ni la columna settings.sizing_mode para no forzar una migracion
+    de esquema bajo presion de tiempo."""
+    return compute_quantity_fixed(fixed_contracts, contract_price, available_cash, multiplier,
+                                   account_value=account_value)
 
 
 def select_affordable_contract(
@@ -101,8 +161,10 @@ def select_affordable_contract(
        ninguno cae en rango) -- igual que el sistema principal. La
        cantidad se deriva de `risk_pct` sobre `account_value` para ESE
        contrato especifico.
-    2. Si esa cuenta no puede comprar ni 1 contrato del primario dentro
-       de su riesgo/cash, cae a buscar entre los candidatos LIQUIDOS
+    2. (DESACTIVADO 2026-09-21 -- ver ALLOW_CHEAPER_CONTRACT_FALLBACK: hoy
+       devuelve (None, "capital_insuficiente", 0) y la cuenta salta a otro
+       ticker.) Si esa cuenta no puede comprar ni 1 contrato del primario
+       dentro de su riesgo/cash, cae a buscar entre los candidatos LIQUIDOS
        (mismo filtro MIN_OPEN_INTEREST) alguno que SI entre (aunque sea
        1 contrato) dentro del riesgo/presupuesto, priorizando entre esos
        el de mayor volumen. Esto es lo que hace que 2 cuentas con la
@@ -128,20 +190,30 @@ def select_affordable_contract(
             # reportaba como si hubiera cumplido el rango objetivo. Ahora
             # el motivo refleja cual rango se uso de verdad.
             if primary.get("used_fallback_range"):
-                reason = "primario -- strikes espaciados, delta fuera de 0.40-0.50 pero dentro del respaldo 0.25-0.50 (mayor volumen de esos)"
+                # 2026-09-29: el texto decia "0.25-0.50" hardcodeado --
+                # quedo desactualizado desde que FALLBACK_DELTA_RANGE subio
+                # a (0.35, 0.50) el 2026-09-27 (piso 0.25->0.35). Puramente
+                # cosmetico (solo el texto del motivo en el log/reason), no
+                # afecta ninguna decision real -- se referencia la
+                # constante para que no vuelva a desincronizarse.
+                reason = (
+                    f"primario -- strikes espaciados, delta fuera de 0.40-0.50 pero dentro del "
+                    f"respaldo {FALLBACK_DELTA_RANGE[0]:.2f}-{FALLBACK_DELTA_RANGE[1]:.2f} (mayor volumen de esos)"
+                )
             else:
                 reason = "primario (mayor volumen en rango de delta 0.40-0.50)"
             return primary, reason, qty
+        if not ALLOW_CHEAPER_CONTRACT_FALLBACK:
+            return None, "capital_insuficiente", 0
 
-    ticker = yf.Ticker(symbol)
-    expirations = _with_timeout(lambda: ticker.options)
-    if not expirations:
+    # 2026-09-21: misma cadena compartida que uso select_contract() arriba (ver
+    # get_expiration_and_chain en option_selection.py) -- el camino de respaldo
+    # ya no descarga una cadena propia, asi que ve el mismo bid/ask que las
+    # demas cuentas del lote.
+    expiration, chain = get_expiration_and_chain(symbol)
+    if expiration is None or chain is None:
         return None, None, 0
     today = date.today()
-    expiration = _nearest_business_day_expiration(list(expirations), today)
-    if expiration is None:
-        return None, None, 0
-    chain = _with_timeout(lambda: ticker.option_chain(expiration))
     df = chain.calls if option_type == "call" else chain.puts
     if df is None or df.empty:
         return None, None, 0
@@ -202,6 +274,8 @@ def select_affordable_contract(
         "option_type": option_type,
         "open_interest": int(best_row.get("openInterest") or 0),
         "volume": int(best_row.get("volume") or 0),
+        # 2026-09-18, mismo motivo que select_contract() en option_selection.py.
+        "implied_volatility": round(float(best_row.get("impliedVolatility") or 0), 4),
     }
     return contract, "fallback por presupuesto (el mas barato que entra en el riesgo/cash disponible, no el de mayor volumen)", best_qty
 

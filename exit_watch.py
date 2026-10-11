@@ -38,7 +38,14 @@ sys.path.insert(0, str(ROOT))
 from multi_user_entry import _log, active_accounts, run_exits_for_account  # noqa: E402
 from paper_trading.singleton_lock import exits_critical_section  # noqa: E402
 
-DEFAULT_INTERVAL_SECONDS = 30
+# Bajado de 30 a 15 (2026-09-17, a pedido del usuario -- INTC subio a un
+# pico real y volvio a bajar por debajo del piso de asegurar_porcion_del_pico
+# TODO dentro de una sola ventana de 30s, asi que la regla nunca alcanzo a
+# ver el pico real, solo lo que quedo en la foto mas cercana). Reduce (no
+# elimina) la ventana ciega entre fotos de precio -- las primas de opciones
+# a 1 contrato pueden moverse igual de rapido dentro de 15s, pero es una
+# mejora real sobre 30s sin duplicar tanto la carga de red.
+DEFAULT_INTERVAL_SECONDS = 15
 
 
 def run_once() -> int:

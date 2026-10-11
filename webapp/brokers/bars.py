@@ -13,7 +13,16 @@ def bars_from_timesales(payload: dict) -> pd.DataFrame:
     if not data:
         return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
     df = pd.DataFrame(data)
-    df["time"] = pd.to_datetime(df["time"])
+    # Tradier devuelve hora LOCAL de mercado (America/New_York) sin offset
+    # (ej. "2026-10-07 10:15:00"), a diferencia de yfinance que ya trae el
+    # indice tz-aware en esa misma zona. Sin localizar, cualquier logica
+    # downstream que compare contra datetime.now() -- como
+    # bollinger_strategy._drop_unclosed_bar(), que decide si la ULTIMA vela
+    # ya cerro -- compararia una hora de NY contra la hora UTC del
+    # servidor, pudiendo quedarse una vela de mas o de menos sin avisar.
+    # Confirmado en vivo 2026-10-07 (yf.Ticker(...).history() trae
+    # dtype=datetime64[s, America/New_York]; Tradier venia naive).
+    df["time"] = pd.to_datetime(df["time"]).dt.tz_localize("America/New_York")
     df = df.set_index("time").sort_index()
     out = pd.DataFrame({
         "Open": df["open"].astype(float),

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bot Familiar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="icon" href="{{ url_for('static', filename='img/logo.ico') }}">
+  <link rel="stylesheet" href="{{ asset_url('css/style.css') }}">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <img class="login-mark" src="{{ url_for('static', filename='img/logo-full.png') }}" alt="Bot Familiar">
+    <h1>Bot Familiar</h1>
+    <p class="muted small">Espacio aparte, solo para familia y amigos cercanos -- acceso aprobado a mano.</p>
+
+    {% if access == 'pending' %}
+      <div class="alert" style="border-color:var(--accent);color:var(--accent);">
+        Tu solicitud esta pendiente. Te vamos a dar acceso apenas la revisemos.
+      </div>
+    {% elif access == 'rejected' %}
+      <div class="alert">Tu solicitud anterior no fue aceptada.</div>
+      <form method="post" action="{{ url_for('familiar_request') }}">
+        <button type="submit">Volver a pedir acceso</button>
+      </form>
+    {% else %}
+      <form method="post" action="{{ url_for('familiar_request') }}">
+        <button type="submit">Pedir acceso a Bot Familiar</button>
+      </form>
+    {% endif %}
+
+    <p class="muted small" style="margin-top:1rem;text-align:center;">
+      <a href="{{ url_for('dashboard') }}">Volver al panel</a>
+    </p>
+  </div>
+</body>
+</html>

@@ -16,6 +16,8 @@ por falta de un escaneo automatico recurrente.
 """
 
 import math
+import threading
+import time
 from datetime import date, datetime, timedelta
 
 import yfinance as yf
@@ -44,7 +46,16 @@ DELTA_RANGE = (0.40, 0.50)
 # Tope superior tambien bajado a 0.50 el 2026-09-15 (misma instruccion
 # de arriba: "no mas que eso" -- ningun contrato, ni siquiera por
 # respaldo, debe superar delta 0.50). Antes (0.25, 0.75).
-FALLBACK_DELTA_RANGE = (0.25, 0.50)
+# Piso subido de 0.25 a 0.35 el 2026-09-27, a pedido del usuario tras el
+# estudio completo de patrones de entrada ("haz un estudio de todos los
+# traders... y vamos a usar eso a nuestro favor" -> "si avisa con esos
+# dos"): 348 entradas reales cruzadas por delta -- el bucket <0.35 (n=40,
+# 11% de las entradas, todas via este camino de respaldo) promedio
+# -0.82% (unico bucket negativo), contra +4% a +8.5% en 0.35-0.50. Son
+# contratos mas OTM y menos liquidos que caen aca solo porque ningun
+# strike quedo en DELTA_RANGE -- el piso mas alto los descarta en vez de
+# aceptarlos como "mejor disponible".
+FALLBACK_DELTA_RANGE = (0.35, 0.50)
 TARGET_BUSINESS_DAYS_OUT = 7
 RISK_FREE_RATE = 0.045  # aproximacion -- no vale la pena pagar una llamada de red extra por esto
 
@@ -53,7 +64,18 @@ RISK_FREE_RATE = 0.045  # aproximacion -- no vale la pena pagar una llamada de r
 # de interes abierto (quote stale/ancho). MIN_OPEN_INTEREST descarta esos
 # antes de elegir por delta (2026-09-09, a pedido del usuario: "no
 # comprando por volumen" -- se agrega el filtro que faltaba).
-MIN_OPEN_INTEREST = 50
+#
+# Subido de 50 a 150 el 2026-09-22, a pedido del usuario ("corrige eso hay
+# que evitar esas cosas"): SOXL (strike 150 call, OI=100 -- pasaba el
+# minimo de 50 con margen) se compro a $7.25 y 19 segundos despues su BID
+# ya marcaba -11% con el SUBYACENTE PRACTICAMENTE PLANO (SOXL se movio
+# $146.5->$147, sin relacion con el swing de la prima) -- volvio a +2.8%
+# dos minutos despues, sola, sin que nada cambiara. La cotizacion de un
+# contrato con poco interes abierto rebota por si sola; 50 no alcanzaba
+# para filtrarlo. No se valido con backtest historico (solo con el
+# incidente real de hoy) -- revisar si conviene relajarlo si reduce
+# demasiado las entradas.
+MIN_OPEN_INTEREST = 150
 
 # yfinance a veces devuelve impliedVolatility ~0.00001 como placeholder
 # cuando no tiene una IV real calculada para esa fila (visto en vivo con
@@ -74,7 +96,23 @@ MIN_IMPLIED_VOL = 0.03
 # esto (esos contratos SI tenian OI>=50). Se descarta cualquier candidato
 # cuyo spread relativo al ask supere este umbral -- no es negociable de
 # forma realista si comprar y vender al instante ya perderia mas de esto.
-MAX_SPREAD_PCT = 0.15
+# Bajado de 0.15 a 0.12 el 2026-09-22 junto con MIN_OPEN_INTEREST (ver nota
+# de SOXL arriba) -- mismo motivo, un margen mas chico entre compra y venta.
+MAX_SPREAD_PCT = 0.12
+
+# 2026-09-17, a pedido del usuario ("es imposible siempre entrar en
+# negativo"): un contrato del CAMINO DE RESPALDO (delta fuera del rango
+# ideal 0.40-0.50, ver FALLBACK_DELTA_RANGE) ya es de peor calidad por
+# definicion -- exigirle el mismo 15% de spread maximo que al camino
+# ideal no alcanza. Caso real visto hoy: V (strike 365 put) paso el
+# filtro de 15% al momento de elegir el contrato por el camino de
+# respaldo, pero el spread ya estaba en 22.6% minutos despues -- un
+# contrato de respaldo con spread ancho es doblemente fragil (delta lejos
+# de lo ideal + ejecucion cara). Se exige un limite mas estricto SOLO
+# para el camino de respaldo, para no combinar los dos riesgos a la vez.
+# Bajado de 0.10 a 0.08 el 2026-09-22 junto con MAX_SPREAD_PCT (ver nota de
+# SOXL arriba).
+MAX_SPREAD_PCT_FALLBACK = 0.08
 
 # Visto en vivo 2026-09-11: contrato de AMC comprado a $0.08 de prima
 # (strike $2.50 practicamente ATM, spot $2.47) -- paso todos los filtros
@@ -114,6 +152,71 @@ def _nearest_business_day_expiration(expirations: list[str], today: date) -> str
     return best
 
 
+# 2026-09-21, a pedido del usuario ("arregla lo del precio igual para todas las
+# cuentas"): multi_user_entry.py llama a select_contract() /
+# select_affordable_contract() UNA VEZ POR CUENTA, y cada llamada descargaba la
+# cadena de opciones de nuevo (~2.5 s por cuenta). Al abrir el mercado el ask se
+# mueve en esos segundos: PLTR entro a $4.55 en 4 cuentas y a $4.90 en las 2
+# ultimas (+7.7%), SMCI a $1.70 vs $1.79. Ahora la cadena se descarga UNA vez por
+# simbolo y se reutiliza CHAIN_SHARE_SECONDS, asi todas las cuentas de un lote
+# ven el MISMO bid/ask (y ademas se piden ~5 de cada 6 cadenas menos a Yahoo).
+# Los fallos NO se guardan (la excepcion sale igual que antes y la siguiente
+# cuenta reintenta). CHAIN_SHARE_ENABLED=False vuelve al comportamiento anterior.
+CHAIN_SHARE_ENABLED = True
+CHAIN_SHARE_SECONDS = 45
+_chain_cache: dict[str, tuple[date, float, str, object]] = {}
+_chain_lock = threading.Lock()
+
+
+# 2026-10-07, mismo mecanismo que _ACTIVE_FETCHER en bollinger_strategy.py:
+# override opcional para que tradier_cycle.py use la cadena de opciones de
+# Tradier en vez de yfinance, sin tocar la logica de seleccion de contrato
+# (select_contract() de abajo no le importa el origen, solo necesita las
+# mismas columnas). None preserva yfinance para todo proceso normal.
+_ACTIVE_CHAIN_FETCHER = None
+
+
+def set_active_chain_fetcher(fetcher) -> None:
+    """fetcher: callable(symbol) -> (expiration_str, chain) donde chain
+    tiene .calls/.puts (DataFrames con columnas strike/bid/ask/openInterest/
+    impliedVolatility/volume, igual que yf.Ticker().option_chain())."""
+    global _ACTIVE_CHAIN_FETCHER
+    _ACTIVE_CHAIN_FETCHER = fetcher
+
+
+def get_expiration_and_chain(symbol: str) -> tuple[str | None, object | None]:
+    """(vencimiento elegido, cadena de opciones de yfinance) de `symbol`, o
+    (None, None) si no hay datos. La cadena se comparte entre llamadas durante
+    CHAIN_SHARE_SECONDS (misma fecha calendario) -- ver la nota de arriba."""
+    if _ACTIVE_CHAIN_FETCHER is not None:
+        return _ACTIVE_CHAIN_FETCHER(symbol)
+    today = date.today()
+    if CHAIN_SHARE_ENABLED:
+        with _chain_lock:
+            hit = _chain_cache.get(symbol)
+            if hit and hit[0] == today and time.monotonic() - hit[1] < CHAIN_SHARE_SECONDS:
+                return hit[2], hit[3]
+
+    ticker = yf.Ticker(symbol)
+    expirations = _with_timeout(lambda: ticker.options)
+    if not expirations:
+        return None, None
+    expiration = _nearest_business_day_expiration(list(expirations), today)
+    if expiration is None:
+        return None, None
+    chain = _with_timeout(lambda: ticker.option_chain(expiration))
+    if chain is None:
+        return None, None
+
+    if CHAIN_SHARE_ENABLED:
+        now = time.monotonic()
+        with _chain_lock:
+            _chain_cache[symbol] = (today, now, expiration, chain)
+            for stale in [k for k, v in _chain_cache.items() if now - v[1] >= CHAIN_SHARE_SECONDS * 4]:
+                del _chain_cache[stale]
+    return expiration, chain
+
+
 def select_contract(symbol: str, option_type: str, spot_price: float) -> dict | None:
     """Elige un contrato de `symbol` (call/put), vencimiento mas cercano a
     TARGET_BUSINESS_DAYS_OUT dias habiles. Descarta filas sin bid/ask en
@@ -126,17 +229,11 @@ def select_contract(symbol: str, option_type: str, spot_price: float) -> dict | 
     ej. AMC), se cae a elegir por |delta| mas cercano a TARGET_DELTA entre
     los que sI pasan el filtro de liquidez, para no devolver None de mas.
     None si no hay datos utilizables para este simbolo."""
-    ticker = yf.Ticker(symbol)
-    expirations = _with_timeout(lambda: ticker.options)
-    if not expirations:
+    expiration, chain = get_expiration_and_chain(symbol)
+    if expiration is None or chain is None:
         return None
 
     today = date.today()
-    expiration = _nearest_business_day_expiration(list(expirations), today)
-    if expiration is None:
-        return None
-
-    chain = _with_timeout(lambda: ticker.option_chain(expiration))
     df = chain.calls if option_type == "call" else chain.puts
     if df is None or df.empty:
         return None
@@ -181,6 +278,19 @@ def select_contract(symbol: str, option_type: str, spot_price: float) -> dict | 
         # que igual caen dentro de FALLBACK_DELTA_RANGE -- un delta mas
         # extremo que eso no vale la pena ni como "mejor disponible".
         fallback = [(row, d) for row, d in candidates if FALLBACK_DELTA_RANGE[0] <= abs(d) <= FALLBACK_DELTA_RANGE[1]]
+        # Limite de spread mas estricto para el camino de respaldo (ver
+        # MAX_SPREAD_PCT_FALLBACK arriba) -- se prefieren los que cumplen,
+        # pero si NINGUNO cumple se usa el conjunto completo igual (mismo
+        # criterio que ya existe para liquidez en option_selector.py: la
+        # falta de un spread ideal no bloquea la entrada si no hay
+        # alternativa, solo se evita cuando hay una mejor disponible).
+        tighter_spread = [
+            (row, d) for row, d in fallback
+            if float(row.get("ask") or 0) and (float(row.get("ask") or 0) - float(row.get("bid") or 0))
+            / float(row.get("ask")) <= MAX_SPREAD_PCT_FALLBACK
+        ]
+        if tighter_spread:
+            fallback = tighter_spread
         if not fallback:
             return None
         # A pedido explicito del usuario (2026-09-11): "siempre comprar
@@ -206,6 +316,13 @@ def select_contract(symbol: str, option_type: str, spot_price: float) -> dict | 
         "option_type": option_type,
         "open_interest": int(best_row.get("openInterest") or 0),
         "volume": int(best_row.get("volume") or 0),
+        # 2026-09-18, a pedido del usuario ("como arreglamos lo de la
+        # prima impredecible"): nunca se guardaba la IV real de la
+        # entrada -- sin ese dato no se puede validar con datos reales
+        # (ni confirmar ni descartar) si un filtro de "IV inflada" en el
+        # momento de entrar mejoraria algo. Se guarda ahora para poder
+        # analizarlo con datos acumulados mas adelante, no a ciegas.
+        "implied_volatility": round(float(best_row.get("impliedVolatility") or 0), 4),
         # Bug real encontrado 2026-09-15: family_sizing.select_affordable_contract()
         # etiquetaba CUALQUIER resultado de select_contract() como "primario
         # (rango 0.40-0.60)" sin chequear si en realidad vino del camino de

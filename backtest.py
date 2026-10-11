@@ -36,7 +36,11 @@ import yfinance as yf
 from paper_trading.bollinger_strategy import (
     BB_PERIOD,
     MARKET_OPEN_BAR_TIME,
+    PEAK_PROFIT_LOCK_PCT,
+    QUICK_PROFIT_MIN_MINUTES,
+    QUICK_PROFIT_PCT,
     SQUEEZE_LOOKBACK,
+    STOP_LOSS_PCT,
     analyze,
     detect_opening_gap_fade,
     detect_rsi_reversal,
@@ -72,24 +76,54 @@ def backtest_ticker(symbol: str, period: str = DEFAULT_PERIOD, interval: str = D
             bar_low = float(window["Low"].iloc[-1])
             new_day = current_day != entry["entry_day"]
 
-            if new_day:
-                exit_price = entry["last_price_same_day"]
+            favorable = direction * (bar_high / entry["entry_price"] - 1) * 100 if direction == 1 else \
+                direction * (bar_low / entry["entry_price"] - 1) * 100
+            adverse = direction * (bar_low / entry["entry_price"] - 1) * 100 if direction == 1 else \
+                direction * (bar_high / entry["entry_price"] - 1) * 100
+            entry["mfe_pct"] = max(entry["mfe_pct"], favorable)
+            entry["mae_pct"] = min(entry["mae_pct"], adverse)
+
+            # 2026-10-02, a pedido del usuario ("crea un motor para eso"):
+            # ANTES este backtest solo cerraba al fin de sesion (ignoraba
+            # el motor de salidas real), lo que explicaba por que
+            # daily_guide.py decia "MARA seguro" mientras las 6 cuentas
+            # reales perdian con MARA -- la simulacion nunca aplicaba
+            # stop-loss/objetivo/aseguramiento de pico, asi que no media
+            # lo mismo que pasa en vivo. Ahora simula las 4 reglas de
+            # evaluate_open_position_exit() con MAYOR impacto real en el
+            # P&L (objetivo, stop-loss, aseguramiento de pico, ganancia
+            # rapida) -- no las 11 completas (reversion tecnica, respaldo
+            # de 1h/semanal, near_close no estan simuladas aqui, requieren
+            # recalcular tendencia multi-temporalidad cada barra, muy
+            # costoso para un backtest masivo). Fidelidad parcial, pero
+            # mucho mas cercana a la realidad que "aguantar hasta el
+            # cierre" de antes.
+            pnl_pct_frac = direction * (current_price / entry["entry_price"] - 1)
+            minutes_since_entry = (current_bar_time - entry["entry_time"]).total_seconds() / 60
+            exit_reason = None
+            if pnl_pct_frac >= entry["profit_target_pct"]:
+                exit_reason = "objetivo_alcanzado"
+            elif pnl_pct_frac <= -STOP_LOSS_PCT:
+                exit_reason = "stop_loss"
+            elif entry["mfe_pct"] / 100 >= PEAK_PROFIT_LOCK_PCT and pnl_pct_frac <= 0:
+                exit_reason = "proteger_pico_de_ganancia"
+            elif minutes_since_entry >= QUICK_PROFIT_MIN_MINUTES and pnl_pct_frac >= QUICK_PROFIT_PCT:
+                exit_reason = "ganancia_rapida"
+            elif new_day:
+                exit_reason = "cierre_de_sesion"
+
+            if exit_reason:
+                exit_price = current_price
                 pnl_pct = direction * (exit_price / entry["entry_price"] - 1) * 100
                 trades.append({
                     "symbol": symbol, "strategy": entry["strategy"], "signal": entry["signal"],
-                    "entry_time": entry["entry_time"], "exit_time": entry["last_bar_time_same_day"],
+                    "entry_time": entry["entry_time"], "exit_time": current_bar_time,
                     "entry_price": entry["entry_price"], "exit_price": exit_price,
-                    "pnl_pct": pnl_pct, "win": pnl_pct > 0,
+                    "pnl_pct": pnl_pct, "win": pnl_pct > 0, "exit_reason": exit_reason,
                     "mfe_pct": entry["mfe_pct"], "mae_pct": entry["mae_pct"],
                 })
                 open_trade = None
             else:
-                favorable = direction * (bar_high / entry["entry_price"] - 1) * 100 if direction == 1 else \
-                    direction * (bar_low / entry["entry_price"] - 1) * 100
-                adverse = direction * (bar_low / entry["entry_price"] - 1) * 100 if direction == 1 else \
-                    direction * (bar_high / entry["entry_price"] - 1) * 100
-                entry["mfe_pct"] = max(entry["mfe_pct"], favorable)
-                entry["mae_pct"] = min(entry["mae_pct"], adverse)
                 entry["last_price_same_day"] = current_price
                 entry["last_bar_time_same_day"] = current_bar_time
             continue
@@ -126,6 +160,7 @@ def backtest_ticker(symbol: str, period: str = DEFAULT_PERIOD, interval: str = D
                     "entry_day": current_day, "last_price_same_day": current_price,
                     "last_bar_time_same_day": current_bar_time,
                     "mfe_pct": 0.0, "mae_pct": 0.0,
+                    "profit_target_pct": candidate.get("profit_target_pct") or 0.10,
                 }
                 break
 

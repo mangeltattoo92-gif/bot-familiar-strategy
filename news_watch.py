@@ -52,3 +52,49 @@ def has_recent_news(symbol: str, hours: int = NEWS_LOOKBACK_HOURS) -> tuple[bool
         return False, None
     recent.sort(reverse=True)
     return True, recent[0][1]
+
+
+# 2026-10-01, a pedido del usuario ("no estas pensando como trader... tienes
+# que funsionar mejor... puedes tener mas informasion" -> "si" -> "hazlo con
+# todas las companias"): has_recent_news() solo detecta SI hay noticia, nunca
+# si es buena o mala -- un titular real puede CONTRADECIR la señal tecnica
+# (ej. MRNA con sesgo diario "alcista" pero un titular real diciendo "es
+# momento de un movimiento bajista"). Clasificacion por palabras clave
+# financieras reales -- NO es una IA leyendo con criterio, es un diccionario
+# fijo. Deliberadamente conservador: "neutral" (no bloquea nada) salvo que
+# el titular tenga una palabra clara de una sola lista, nunca ambas listas a
+# la vez (titular mixto/ambiguo -> neutral, nunca se adivina).
+_BULLISH_WORDS = {
+    "jumps", "jump", "surges", "surge", "soars", "soar", "rallies", "rally",
+    "beats", "beat", "upgrade", "upgraded", "outperform", "bullish",
+    "gains", "climbs", "climb", "rises", "rise", "record high", "wins",
+    "win", "retreat", "strong", "exploded", "explode", "accelerat",
+}
+_BEARISH_WORDS = {
+    "falls", "fall", "drops", "drop", "plunges", "plunge", "sinks", "sink",
+    "downgrade", "downgraded", "underperform", "bearish", "cuts", "cut",
+    "misses", "miss", "warns", "warn", "slips", "slip", "slides", "slide",
+    "sell-off", "selloff", "lawsuit", "investigation", "recall", "probe",
+}
+
+
+def news_sentiment(symbol: str, hours: int = NEWS_LOOKBACK_HOURS) -> str:
+    """'alcista' / 'bajista' / 'neutral' segun el titular real mas reciente
+    de `symbol` en las ultimas `hours` horas. 'neutral' si no hay noticia
+    reciente, si el feed falla, o si el titular no tiene ninguna palabra
+    clara de las listas (nunca se fuerza una lectura ambigua). NO es
+    analisis de IA en vivo -- es un diccionario fijo de palabras clave
+    financieras en ingles (Yahoo Finance publica en ingles), pensado para
+    detectar el caso CLARO (titular obviamente alcista o bajista), no para
+    matices."""
+    has_news, title = has_recent_news(symbol, hours=hours)
+    if not has_news or not title:
+        return "neutral"
+    title_lower = title.lower()
+    is_bullish = any(w in title_lower for w in _BULLISH_WORDS)
+    is_bearish = any(w in title_lower for w in _BEARISH_WORDS)
+    if is_bullish and not is_bearish:
+        return "alcista"
+    if is_bearish and not is_bullish:
+        return "bajista"
+    return "neutral"  # ninguna palabra clara, o las dos a la vez (titular mixto) -- no se adivina

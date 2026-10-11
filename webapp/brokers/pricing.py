@@ -70,10 +70,21 @@ def effective_window(data_delay_minutes: int, lookback_minutes: int, now: "datet
     """Ventana (start, end) para pedir velas a timesales, ajustada al retraso
     real de la cuenta. Pedir 'hasta ahora mismo' en una cuenta con retraso
     devuelve vacio (confirmado en vivo) -- el fin de la ventana nunca pasa de
-    ahora menos el retraso. Formato 'YYYY-MM-DD HH:MM', el que pide Tradier."""
+    ahora menos el retraso. Formato 'YYYY-MM-DD HH:MM', el que pide Tradier.
+
+    IMPORTANTE (bug real encontrado y confirmado en vivo 2026-10-07):
+    Tradier interpreta start/end de timesales en hora de America/New_York,
+    NO en UTC -- probado con una ventana que solo tiene sentido en una
+    zona (ej. "11:05" cuando eran las 11:10am ET / 15:10 UTC: devolvio las
+    velas mas recientes, confirmando ET). Formatear directamente un
+    datetime UTC sin convertir desplazaba la ventana pedida 4-5 horas."""
     from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
     now = now or datetime.now(timezone.utc)
-    end = now - timedelta(minutes=data_delay_minutes)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)  # se asume UTC si no trae zona, nunca hora local ambigua
+    now_et = now.astimezone(ZoneInfo("America/New_York"))
+    end = now_et - timedelta(minutes=data_delay_minutes)
     start = end - timedelta(minutes=lookback_minutes)
     fmt = "%Y-%m-%d %H:%M"
     return start.strftime(fmt), end.strftime(fmt)

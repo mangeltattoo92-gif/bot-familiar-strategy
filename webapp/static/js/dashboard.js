@@ -509,6 +509,156 @@ function closeSettingsModal() {
   settingsModal.hidden = true;
 }
 
+/* ---------- Agregar ticker directo desde la Watchlist (boton "+") ---------- */
+const watchlistRefreshBtn = document.getElementById("watchlist-refresh-btn");
+if (watchlistRefreshBtn) {
+  watchlistRefreshBtn.addEventListener("click", () => {
+    watchlistRefreshBtn.disabled = true;
+    refreshWatchlist().finally(() => { watchlistRefreshBtn.disabled = false; });
+  });
+}
+const watchlistAddBtn = document.getElementById("watchlist-add-btn");
+const watchlistAddRow = document.getElementById("watchlist-add-row");
+const watchlistAddInput = document.getElementById("watchlist-add-input");
+const watchlistAddConfirm = document.getElementById("watchlist-add-confirm");
+const watchlistAddCancel = document.getElementById("watchlist-add-cancel");
+const watchlistAddError = document.getElementById("watchlist-add-error");
+
+if (watchlistAddBtn) {
+  watchlistAddBtn.addEventListener("click", () => {
+    watchlistAddError.textContent = "";
+    watchlistAddRow.hidden = !watchlistAddRow.hidden;
+    if (!watchlistAddRow.hidden) {
+      watchlistAddInput.value = "";
+      watchlistAddInput.focus();
+      setWatchlistPanelCollapsed(false);
+    }
+  });
+}
+if (watchlistAddCancel) {
+  watchlistAddCancel.addEventListener("click", () => { watchlistAddRow.hidden = true; });
+}
+
+async function submitAddTicker() {
+  const ticker = watchlistAddInput.value.trim().toUpperCase();
+  watchlistAddError.textContent = "";
+  if (!ticker || !/^[A-Z]{1,6}([.\-][A-Z]{1,3})?$/.test(ticker)) {
+    watchlistAddError.textContent = "Ticker invalido.";
+    return;
+  }
+  watchlistAddConfirm.disabled = true;
+  try {
+    const current = await fetchJSON("/api/settings");
+    if (!current) {
+      watchlistAddError.textContent = "No se pudo leer tu configuracion actual.";
+      watchlistAddConfirm.disabled = false;
+      return;
+    }
+    const list = (current.watchlist || []).map((t) => t.toUpperCase());
+    if (list.includes(ticker)) {
+      watchlistAddError.textContent = `${ticker} ya esta en tu watchlist.`;
+      watchlistAddConfirm.disabled = false;
+      return;
+    }
+    list.push(ticker);
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        max_trades_per_day: current.max_trades_per_day,
+        watchlist: list.join(","),
+        max_daily_loss_pct: current.max_daily_loss_pct,
+        sizing_mode: "manual",
+        contracts_per_trade: current.contracts_per_trade || 1,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      watchlistAddError.textContent = data.error || "No se pudo agregar el ticker.";
+      watchlistAddConfirm.disabled = false;
+      return;
+    }
+    watchlistAddRow.hidden = true;
+    watchlistAddConfirm.disabled = false;
+    await refreshWatchlist();
+  } catch (e) {
+    watchlistAddError.textContent = "Error de conexion.";
+    watchlistAddConfirm.disabled = false;
+  }
+}
+if (watchlistAddConfirm) watchlistAddConfirm.addEventListener("click", submitAddTicker);
+if (watchlistAddInput) {
+  watchlistAddInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitAddTicker();
+    if (e.key === "Escape") { watchlistAddRow.hidden = true; }
+  });
+}
+
+/* ---------- Activar/pausar cada lista para el motor (watchlist propia
+   y fast_watchlist compartida, cada una con su propio interruptor --
+   2026-10-05, a pedido explicito: "que cada usuario elija con cual
+   watchlist trabajar") ---------- */
+const watchlistEnabledBtn = document.getElementById("watchlist-enabled-btn");
+const fastWatchlistEnabledBtn = document.getElementById("fast-watchlist-enabled-btn");
+const capitalListEnabledBtn = document.getElementById("capital-list-enabled-btn");
+
+function paintListEnableBtn(btn, enabled) {
+  if (!btn) return;
+  btn.textContent = enabled ? "Activa" : "Pausada";
+  btn.classList.toggle("off", !enabled);
+}
+
+function paintAllListButtons(data) {
+  paintListEnableBtn(watchlistEnabledBtn, data.watchlist_enabled !== false);
+  paintListEnableBtn(fastWatchlistEnabledBtn, data.fast_watchlist_enabled !== false);
+  paintListEnableBtn(capitalListEnabledBtn, data.default_capital_list_enabled === true);
+}
+
+// 2026-10-05, a pedido explicito ("si la watchlist esta activa las otras
+// se desactivan, a no ser que el usuario las active"): las 3 listas son
+// mutuamente excluyentes por defecto -- activar UNA apaga las otras 2 del
+// lado del servidor (ver update_settings() en engine.py), asi que ESTE
+// toggle siempre repinta las 3 con lo que el servidor confirma, nunca
+// asume el estado localmente.
+async function toggleListEnabled(btn, field) {
+  btn.disabled = true;
+  try {
+    const current = await fetchJSON("/api/settings");
+    if (!current) return;
+    const nextValue = !current[field];
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        max_trades_per_day: current.max_trades_per_day,
+        max_daily_loss_pct: current.max_daily_loss_pct,
+        sizing_mode: "manual",
+        contracts_per_trade: current.contracts_per_trade || 1,
+        [field]: nextValue,
+      }),
+    });
+    const data = await res.json();
+    if (res.ok) paintAllListButtons(data);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+if (watchlistEnabledBtn) {
+  watchlistEnabledBtn.addEventListener("click", () => toggleListEnabled(watchlistEnabledBtn, "watchlist_enabled"));
+}
+if (fastWatchlistEnabledBtn) {
+  fastWatchlistEnabledBtn.addEventListener("click", () => toggleListEnabled(fastWatchlistEnabledBtn, "fast_watchlist_enabled"));
+}
+if (capitalListEnabledBtn) {
+  capitalListEnabledBtn.addEventListener("click", () => toggleListEnabled(capitalListEnabledBtn, "default_capital_list_enabled"));
+}
+(async () => {
+  const current = await fetchJSON("/api/settings");
+  if (!current) return;
+  paintAllListButtons(current);
+})();
+
 /* ---------- Abandonar la app (solo cuentas no-admin, ver .danger-zone) --------- */
 const leaveAppBtn = document.getElementById("leave-app-btn");
 const leaveAppModal = document.getElementById("leave-app-modal");
@@ -561,45 +711,6 @@ if (leaveAppConfirm) leaveAppConfirm.addEventListener("click", async () => {
     leaveAppConfirm.textContent = "Confirmar y abandonar";
   }
 });
-
-/* ---------- Dinero real (banner + modal informativo, sin funcionalidad
-   real todavia) ---------- */
-const realMoneyModal = document.getElementById("real-money-modal");
-const realMoneyOpenBtn = document.getElementById("real-money-open-btn");
-const realMoneyNavLink = document.getElementById("real-money-nav-link");
-const realMoneyClose = document.getElementById("real-money-close");
-const realMoneyOk = document.getElementById("real-money-ok");
-function openRealMoneyModal(e) {
-  if (e) e.preventDefault();
-  realMoneyModal.hidden = false;
-}
-function closeRealMoneyModal() {
-  realMoneyModal.hidden = true;
-}
-if (realMoneyOpenBtn) realMoneyOpenBtn.addEventListener("click", openRealMoneyModal);
-if (realMoneyNavLink) realMoneyNavLink.addEventListener("click", openRealMoneyModal);
-if (realMoneyClose) realMoneyClose.addEventListener("click", closeRealMoneyModal);
-if (realMoneyOk) realMoneyOk.addEventListener("click", closeRealMoneyModal);
-
-const robinhoodStatusConnected = document.getElementById("robinhood-status-connected");
-const robinhoodStatusPending = document.getElementById("robinhood-status-pending");
-const robinhoodMarkBtn = document.getElementById("robinhood-mark-btn");
-const robinhoodUnmarkBtn = document.getElementById("robinhood-unmark-btn");
-
-async function setRobinhoodConnected(connected) {
-  const res = await fetch("/api/robinhood-connected", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ connected }),
-  });
-  const data = await res.json();
-  if (data.ok) {
-    robinhoodStatusConnected.hidden = !data.connected;
-    robinhoodStatusPending.hidden = data.connected;
-  }
-}
-if (robinhoodMarkBtn) robinhoodMarkBtn.addEventListener("click", () => setRobinhoodConnected(true));
-if (robinhoodUnmarkBtn) robinhoodUnmarkBtn.addEventListener("click", () => setRobinhoodConnected(false));
 
 settingsBtn.addEventListener("click", openSettingsModal);
 settingsClose.addEventListener("click", closeSettingsModal);
@@ -716,6 +827,12 @@ function setLastUpdated(elId, isoString) {
 function renderStatus(status) {
   lastAccountValue = status.total_account_value;
   document.getElementById("cash-balance").textContent = fmtUsd(status.cash_balance);
+  const unsettledEl = document.getElementById("cash-unsettled");
+  if (unsettledEl) {
+    const unsettled = status.unsettled_cash || 0;
+    unsettledEl.hidden = unsettled <= 0.01;
+    if (unsettled > 0.01) unsettledEl.textContent = `${fmtUsd(unsettled)} sin liquidar hasta mañana 5am ET`;
+  }
   document.getElementById("total-value").textContent = fmtUsd(status.total_account_value);
 
   const pnlEl = document.getElementById("total-pnl");
@@ -1305,3 +1422,158 @@ setInterval(refreshMarketStatus, 30000);
 setInterval(() => { if (!watchlistBox.classList.contains("collapsed")) refreshWatchlist(); }, 30000);
 setInterval(() => { if (!fastWatchlistBox.classList.contains("collapsed")) refreshFastWatchlist(); }, 30000);
 setInterval(() => { if (!errorLogBox.classList.contains("collapsed")) refreshErrorLog(); }, 30000);
+
+// 2026-09-17, a pedido del usuario ("crea dentro de la app una seccion
+// de noticias que resalte hasta que el usuario entre y la lea"). Solo
+// existe el boton/modal en el HTML si news_enabled es True para esta
+// cuenta (ver NEWS_ENABLED_USERS en app.py) -- por eso todo esto es un
+// no-op silencioso para el resto de los usuarios (newsBtn es null).
+const newsBtn = document.getElementById("news-btn");
+if (newsBtn) {
+  const newsModal = document.getElementById("news-modal");
+  const newsClose = document.getElementById("news-close");
+  const newsBody = document.getElementById("news-body");
+
+  function escapeHtml(s) {
+    const div = document.createElement("div");
+    div.textContent = s;
+    return div.innerHTML;
+  }
+
+  function renderNews(items) {
+    if (!items.length) {
+      newsBody.innerHTML = '<p class="muted">Sin novedades todavía.</p>';
+      return;
+    }
+    newsBody.innerHTML = items.map((item) => `
+      <div class="news-item${item.is_read ? "" : " news-item-unread"}">
+        <div class="news-item-head">
+          <strong>${escapeHtml(item.title)}</strong>
+          <span class="muted small">${new Date(item.created_at).toLocaleDateString("es-ES", { day: "numeric", month: "short" })}</span>
+        </div>
+        <p>${escapeHtml(item.body).replace(/\n/g, "<br>")}</p>
+      </div>
+    `).join("");
+  }
+
+  async function refreshNewsGlow() {
+    try {
+      const res = await fetch("/api/news");
+      const data = await res.json();
+      const anyUnread = data.items.some((item) => !item.is_read);
+      newsBtn.classList.toggle("has-unread", anyUnread);
+    } catch (e) { /* silencioso -- no bloquea el resto del dashboard */ }
+  }
+
+  newsBtn.addEventListener("click", async () => {
+    newsModal.hidden = false;
+    try {
+      const res = await fetch("/api/news");
+      const data = await res.json();
+      renderNews(data.items);
+      if (data.items.some((item) => !item.is_read)) {
+        await fetch("/api/news/mark-read", { method: "POST" });
+        newsBtn.classList.remove("has-unread");
+      }
+    } catch (e) {
+      newsBody.innerHTML = '<p class="muted">No se pudo cargar las novedades.</p>';
+    }
+  });
+  newsClose.addEventListener("click", () => { newsModal.hidden = true; });
+  newsModal.addEventListener("click", (e) => { if (e.target === newsModal) newsModal.hidden = true; });
+
+  refreshNewsGlow();
+  // 2026-09-17, a pedido del usuario ("haz que se actualice"): antes
+  // solo chequeaba novedades una vez al cargar la pagina -- si alguien
+  // dejaba el dashboard abierto y se agregaba una nueva, no se enteraba
+  // hasta recargar. Ahora repite el chequeo cada 30s, igual que el resto
+  // de los datos en vivo del dashboard.
+  setInterval(refreshNewsGlow, 30000);
+}
+
+// 2026-09-28, a pedido del usuario ("soporte tecnico donde los usuarios
+// puedan escribirme dentro de la aplicacion... es personal para cada
+// usuario y solo ellos tienen acceso a las conversaciones personales").
+// 2026-10-05, a pedido explicito ("en mi cuenta de miguel perez no se
+// abre y quiero que abra como la de los otros usuarios"): el boton/modal
+// ahora es el mismo para TODAS las cuentas, admin incluido -- la cuenta
+// admin sigue teniendo ademas su bandeja completa en /admin#support, esto
+// solo le da el mismo atajo rapido que ya tienen los demas usuarios.
+const supportBtn = document.getElementById("support-btn");
+if (supportBtn) {
+  const supportModal = document.getElementById("support-modal");
+  const supportClose = document.getElementById("support-close");
+  const supportThreadEl = document.getElementById("support-thread");
+  const supportForm = document.getElementById("support-form");
+  const supportInput = document.getElementById("support-input");
+
+  function escapeHtmlSupport(s) {
+    const div = document.createElement("div");
+    div.textContent = s;
+    return div.innerHTML;
+  }
+
+  function renderSupportThread(items) {
+    if (!items.length) {
+      supportThreadEl.innerHTML = '<p class="muted">Todavía no escribiste nada. Contanos en qué te podemos ayudar.</p>';
+      return;
+    }
+    supportThreadEl.innerHTML = items.map((m) => `
+      <div class="support-msg support-msg-${m.sender}">
+        <p>${escapeHtmlSupport(m.body).replace(/\n/g, "<br>")}</p>
+        <span class="support-msg-time">${new Date(m.created_at).toLocaleString("es-ES", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+      </div>
+    `).join("");
+    supportThreadEl.scrollTop = supportThreadEl.scrollHeight;
+  }
+
+  async function refreshSupportGlow() {
+    try {
+      const res = await fetch("/api/support/unread");
+      const data = await res.json();
+      supportBtn.classList.toggle("has-unread", !!data.unread);
+    } catch (e) { /* silencioso */ }
+  }
+
+  async function openSupport() {
+    supportModal.hidden = false;
+    try {
+      const res = await fetch("/api/support");
+      const data = await res.json();
+      renderSupportThread(data.thread);
+      await fetch("/api/support/mark-read", { method: "POST" });
+      supportBtn.classList.remove("has-unread");
+    } catch (e) {
+      supportThreadEl.innerHTML = '<p class="muted">No se pudo cargar la conversación.</p>';
+    }
+  }
+
+  supportBtn.addEventListener("click", openSupport);
+  supportClose.addEventListener("click", () => { supportModal.hidden = true; });
+  supportModal.addEventListener("click", (e) => { if (e.target === supportModal) supportModal.hidden = true; });
+
+  supportForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = supportInput.value.trim();
+    if (!body) return;
+    supportInput.disabled = true;
+    try {
+      const res = await fetch("/api/support", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+      });
+      const data = await res.json();
+      if (data.thread) {
+        renderSupportThread(data.thread);
+        supportInput.value = "";
+      }
+    } catch (e) { /* el usuario puede reintentar */ }
+    supportInput.disabled = false;
+    supportInput.focus();
+  });
+
+  refreshSupportGlow();
+  setInterval(refreshSupportGlow, 30000);
+}
+

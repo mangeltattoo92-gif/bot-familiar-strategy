@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Términos y Condiciones — Bot Familiar</title>
+  <title>Términos y Condiciones — Metabot</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -21,7 +21,6 @@
     .terms-wrap ul { padding-left: 1.2rem; margin: 0.4rem 0; }
     .terms-wrap li { margin-bottom: 0.4rem; }
     .terms-wrap .allcaps { text-transform: uppercase; font-size: 0.82rem; line-height: 1.6; color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.9rem 1rem; }
-    .placeholder { color: var(--amber); font-style: italic; }
     .warn-box {
       background: var(--red-soft); border: 1px solid var(--red); border-radius: var(--radius-md);
       padding: 1rem 1.2rem; margin-bottom: 1.8rem; font-size: 0.88rem; line-height: 1.55;
@@ -36,16 +35,16 @@
   <div class="terms-wrap">
     <a class="link back-link" href="{{ url_for('dashboard') }}">&larr; Volver</a>
     <h1>Términos y Condiciones · Aviso de Riesgo</h1>
-    <p class="meta">Bot Familiar · Versión 1.2 · Vigente desde el 13/09/2026 · Aplicable a usuarios residentes en Estados Unidos</p>
+    <p class="meta">Metabot · Versión 3.0 · Vigente desde el 07/10/2026 · Aplicable a usuarios residentes en Estados Unidos</p>
 
     <div class="warn-box">
-      <strong>Aviso importante:</strong> Bot Familiar es una herramienta de software automatizada
+      <strong>Aviso importante:</strong> Metabot es una herramienta de software automatizada
       ("el Bot", "el Servicio"). No es un broker-dealer registrado, no es un asesor de inversiones
       registrado ante la SEC ni ante ningún estado, y nada de lo que este documento, el panel o
       cualquier comunicación del Bot digan constituye asesoría financiera, legal, impositiva o de
-      inversión de ningún tipo. Este documento fue redactado por el operador del Servicio con
-      asistencia de inteligencia artificial, tomando como referencia estructuras usuales en acuerdos
-      de brokers reales (Robinhood, Charles Schwab, Interactive Brokers, entre otros) — pero
+      inversión de ningún tipo. Este documento fue redactado por el operador del Servicio,
+      tomando como referencia estructuras usuales en acuerdos
+      de brokers reales (Tradier, Charles Schwab, Interactive Brokers, entre otros) — pero
       <strong>no reemplaza la revisión de un abogado admitido a ejercer en Estados Unidos</strong>.
       Antes de operar con dinero real, se recomienda consultar con un profesional legal y financiero
       calificado.
@@ -79,7 +78,7 @@
     <section id="s1">
       <h2>1. Definiciones</h2>
       <ul>
-        <li><strong>"Servicio" / "Bot":</strong> la herramienta de software Bot Familiar, incluyendo su
+        <li><strong>"Servicio" / "Bot":</strong> la herramienta de software Metabot, incluyendo su
         panel web, sus procesos automatizados de escaneo y ejecución (simulada o real) de operaciones,
         y toda comunicación generada por ella.</li>
         <li><strong>"Operador":</strong> la persona que desarrolla, mantiene y aloja el Servicio en su
@@ -87,8 +86,9 @@
         <li><strong>"Usuario" / "Cuenta":</strong> cualquier persona que se registra y utiliza el
         Servicio bajo su propio nombre y capital.</li>
         <li><strong>"Corretaje Conectado":</strong> la cuenta de corretaje de terceros (por ejemplo,
-        Robinhood) que un Usuario decide vincular al Servicio por su propia cuenta y bajo su propia
-        autorización, para operar con dinero real.</li>
+        Tradier) que un Usuario decide vincular al Servicio, mediante un token de API personal que el
+        propio Usuario genera desde su cuenta de ese corretaje y pega en el Servicio, por su propia
+        cuenta y bajo su propia autorización, para operar con dinero real.</li>
       </ul>
     </section>
 
@@ -109,10 +109,17 @@
 
     <section id="s3">
       <h2>3. Descripción del Servicio</h2>
-      <p>Bot Familiar escanea datos de mercado públicos y ejecuta (en modo simulado, o real cuando
+      <p>Metabot escanea datos de mercado públicos y ejecuta (en modo simulado, o real cuando
       esté habilitado y conectado por el propio Usuario) operaciones de opciones sobre acciones según
-      reglas técnicas predefinidas (bandas de Bollinger y estrategias relacionadas: <em>squeeze
-      breakout</em>, <em>gap fade</em>, <em>giro SMA20</em>). Cada Usuario:</p>
+      reglas técnicas predefinidas y no discrecionales (el detalle del modelo es propiedad del
+      Operador y no se publica).</p>
+      <p>El Servicio es un producto de software provisto con inteligencia artificial: su código,
+      lógica y mantenimiento son desarrollados con asistencia de sistemas de IA bajo supervisión del
+      Operador. Esto es independiente de la naturaleza determinística de las reglas técnicas descriptas
+      arriba — no hay un modelo de IA generativa decidiendo discrecionalmente cada operación en tiempo
+      real; la IA participa en el desarrollo y mantenimiento del Servicio, no en el criterio de cada
+      operación individual.</p>
+      <p>Cada Usuario:</p>
       <ul>
         <li>Opera bajo su propio nombre, con su propio capital, y asume su propio riesgo.</li>
         <li>No delega la gestión de su dinero a ninguna otra persona, incluido el Operador.</li>
@@ -122,11 +129,32 @@
       <p>El Operador NO gestiona, recomienda, ni ejecuta operaciones en nombre de otros Usuarios.
       Cada cuenta conectada opera de forma completamente independiente, con parámetros propios
       (tamaño de posición, riesgo por operación, watchlist).</p>
-      <p><strong>El Servicio se ofrece sin fines de lucro.</strong> El Operador no cobra cuota,
-      suscripción ni comisión alguna por el uso del Servicio, y no recibe ninguna compensación atada
-      al capital administrado ni al resultado de las operaciones de ningún Usuario. Esto refuerza que
-      el Operador no actúa como asesor de inversiones compensado ni como gestor de patrimonio de
-      terceros — es una herramienta compartida entre familiares, sin ánimo comercial.</p>
+      <p>Metabot <strong>opera bajo un modelo comercial</strong>
+      y está abierto a cualquier Usuario elegible del público en general. El Operador puede ofrecer
+      planes gratuitos y planes pagos, cobrar tarifas de suscripción recurrentes u otras formas de
+      cobro por el acceso a funciones de Metabot, cuyo monto, periodicidad, condiciones de renovación,
+      cancelación y reembolso se detallarán en el Servicio al momento de contratar un plan pago y se
+      regirán, además de por estos Términos, por las condiciones específicas de ese plan y por la
+      política del procesador de pagos utilizado. En ningún caso una tarifa de suscripción de Metabot
+      constituye una compensación atada al resultado de las operaciones de un Usuario, ni convierte
+      al Operador en un asesor de inversiones registrado o compensado — las tarifas remuneran el
+      acceso al software, no el rendimiento de ninguna cuenta. Ninguna de las dos modalidades (gratis
+      o paga) implica que el Operador gestione, recomiende, ni ejecute operaciones en nombre de un
+      Usuario.</p>
+      <p>Salvo que se indique lo contrario al momento de la contratación, los planes pagos de Metabot
+      son de <strong>renovación automática y recurrente</strong> (mensual, anual u otro período
+      indicado) hasta que el Usuario los cancele. El Usuario puede cancelar en cualquier momento desde
+      su panel o escribiendo al Operador conforme a la Sección 21; la cancelación surte efecto al
+      final del período ya pagado, sin reembolso prorrateado de ese período salvo que la ley aplicable
+      exija lo contrario o el Operador indique una política distinta al momento de la contratación.
+      Los precios publicados en el sitio son un total estimado que ya incorpora una estimación de
+      impuesto a las ventas; el impuesto real aplicado al momento del cobro lo calcula el procesador
+      de pagos según la jurisdicción del Usuario y puede diferir levemente del estimado publicado.
+      El impuesto aplicable, cuando corresponda, es responsabilidad del Usuario. El Operador puede
+      modificar los precios de los planes pagos hacia adelante,
+      con al menos 15 días de aviso previo al Usuario antes de que el nuevo precio se aplique a su
+      próxima renovación; el Usuario puede cancelar antes de esa renovación si no acepta el nuevo
+      precio.</p>
     </section>
 
     <section id="s4">
@@ -141,6 +169,15 @@
       herramienta es adecuado para su propia situación, y de determinar la idoneidad ("suitability")
       de operar opciones — esa determinación corresponde, en última instancia, al propio Corretaje
       Conectado del Usuario, no a este Servicio.</p>
+      <p><strong>Sobre el lenguaje promocional:</strong> el sitio público, la landing de Metabot y
+      cualquier material de marketing pueden usar lenguaje motivacional o aspiracional (por ejemplo,
+      referencias a la disciplina, la mentalidad o los hábitos de inversores exitosos) para describir
+      el enfoque del Servicio. <strong>Ese lenguaje es ilustrativo y aspiracional únicamente — no es
+      una representación, promesa, proyección ni garantía de ganancias, de un resultado típico, ni de
+      que un Usuario vaya a alcanzar ningún nivel de patrimonio o rendimiento</strong>. El Servicio no
+      publica ni respalda estadísticas de resultados típicos de sus Usuarios. El rendimiento de
+      cualquier Usuario depende de factores fuera del control del Operador, incluyendo las condiciones
+      de mercado y las decisiones de cada Usuario.</p>
     </section>
 
     <section id="s5">
@@ -167,8 +204,10 @@
     <section id="s6">
       <h2>6. Modo Simulado vs. Dinero Real</h2>
       <p>Por defecto, el Servicio opera en modo <strong>simulado (paper trading)</strong>: no coloca
-      órdenes reales, no mueve dinero real. Si en el futuro se habilita la conexión con un Corretaje
-      Conectado (por ejemplo, Robinhood, vía su función de "Agentic Trading"), esa conexión:</p>
+      órdenes reales, no mueve dinero real. Cuando el Usuario conecta un Corretaje Conectado (por
+      ejemplo, Tradier), mediante un token de API personal que el propio Usuario genera desde su
+      cuenta de ese corretaje y pega en el Servicio (el Servicio nunca solicita ni almacena la
+      contraseña del Usuario en el Corretaje Conectado), esa conexión:</p>
       <ul>
         <li>Es siempre iniciada y autorizada directamente por cada Usuario desde su propia cuenta de
         corretaje, nunca por el Operador ni por ningún tercero en su nombre.</li>
@@ -178,20 +217,26 @@
         Corretaje Conectado o desde el panel del Servicio.</li>
         <li>Queda sujeta, en todo momento, a los términos de servicio, políticas y controles de
         riesgo del propio Corretaje Conectado — el Servicio no puede saltar ni anular esos controles.</li>
+        <li>No opera con dinero real por el solo hecho de conectarse: conectar el Corretaje Conectado
+        únicamente guarda el token de forma cifrada. El Usuario debe activar explícitamente, con un
+        interruptor separado y una confirmación adicional dentro del panel, la opción de "operar con
+        dinero real" antes de que el Servicio coloque cualquier orden real en su cuenta — y puede
+        desactivarla en cualquier momento.</li>
       </ul>
     </section>
 
     <section id="s7">
       <h2>7. Servicios y Marcas de Terceros</h2>
-      <p>El Servicio utiliza datos de mercado de terceros (incluyendo, entre otros, Yahoo Finance) y,
-      cuando esté habilitado, se conecta a la infraestructura de Robinhood Markets, Inc. ("Robinhood")
-      mediante su función de Agentic Trading. <strong>El Servicio no está afiliado, patrocinado,
-      respaldado ni verificado por Robinhood Markets, Inc. ni por Yahoo Finance.</strong> "Robinhood"
-      y cualquier otra marca de terceros mencionada pertenecen a sus respectivos dueños y se usan aquí
-      únicamente con fines descriptivos. El Operador no es responsable por la exactitud, disponibilidad
-      ni continuidad de los servicios de estos terceros, ni por cambios que dichos terceros realicen a
-      sus propias APIs, políticas o disponibilidad, que puedan afectar el funcionamiento del Servicio
-      sin previo aviso.</p>
+      <p>El Servicio utiliza datos de mercado de terceros (incluyendo, entre otros, Yahoo Finance y,
+      cuando el Usuario conecta un Corretaje Conectado, los datos de mercado de ese corretaje) y, para
+      cada Usuario que lo conecte, se conecta a la infraestructura de Tradier LLC ("Tradier") mediante
+      la API de Tradier y el token de API personal que el propio Usuario provee. <strong>El Servicio no
+      está afiliado, patrocinado, respaldado ni verificado por Tradier LLC ni por Yahoo Finance.</strong>
+      "Tradier" y cualquier otra marca de terceros mencionada pertenecen a sus respectivos dueños y se
+      usan aquí únicamente con fines descriptivos. El Operador no es responsable por la exactitud,
+      disponibilidad ni continuidad de los servicios de estos terceros, ni por cambios que dichos
+      terceros realicen a sus propias APIs, políticas o disponibilidad, que puedan afectar el
+      funcionamiento del Servicio sin previo aviso.</p>
     </section>
 
     <section id="s8">
@@ -235,6 +280,13 @@
       momento) con fines de soporte técnico. Cualquier excepción temporal a esta regla se comunica
       explícitamente dentro del panel mientras esté activa. El Operador no vende ni comparte los datos
       de los Usuarios con terceros con fines comerciales.</p>
+      <p>Si el Usuario es residente de California u otro estado con una ley de privacidad de datos
+      del consumidor vigente (por ejemplo, la <em>California Consumer Privacy Act</em>, CCPA/CPRA),
+      puede tener derechos adicionales sobre sus datos personales — incluyendo acceso, corrección,
+      eliminación y exclusión de ciertos usos — que puede ejercer escribiendo al Operador conforme a
+      la Sección 21. El Operador recopila únicamente los datos necesarios para operar la cuenta del
+      Usuario (usuario, correo, contraseña hasheada, actividad de la cuenta) y no los usa para
+      publicidad dirigida de terceros.</p>
     </section>
 
     <section id="s12">
@@ -262,7 +314,12 @@
       Operador renuncian a su derecho a un juicio por jurado y a participar en una acción colectiva
       ("class action") o representativa.</strong> Cualquiera de las partes puede optar por excluirse de
       esta cláusula de arbitraje notificando por escrito dentro de los 30 días posteriores a la
-      aceptación de estos Términos.</p>
+      aceptación de estos Términos. Esta cláusula no impide que el Usuario o el Operador presenten
+      reclamos individuales ante un tribunal de reclamos menores ("small claims court") de su
+      jurisdicción, cuando el reclamo califique para ese fuero. Si por cualquier motivo la renuncia a
+      acción colectiva de esta Sección fuera declarada inválida respecto de una disputa en particular,
+      esa disputa se resolverá en tribunal y no en arbitraje, pero el resto de esta cláusula de
+      arbitraje permanece vigente para las demás disputas.</p>
     </section>
 
     <section id="s15">

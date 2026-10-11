@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Suscripción — {{ page_title|default('Metabot') }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="icon" href="{{ url_for('static', filename='img/metabot-logo.ico') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/metabot-icon-192.png') }}">
+  <meta name="theme-color" content="#0b0d12">
+  <link rel="stylesheet" href="{{ asset_url('css/style.css') }}">
+  <style>
+    .sub-wrap { max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+    .sub-head { margin-bottom: 1.6rem; }
+    .sub-head h1 { font-size: 1.4rem; margin: 0 0 0.3rem; }
+    .sub-head p { color: var(--muted); font-size: 0.9rem; margin: 0; }
+    .sub-banner { border-radius: var(--radius-md); padding: 0.85rem 1.1rem; font-size: 0.85rem; margin-bottom: 1.4rem; }
+    .sub-banner.ok { background: var(--green-soft); color: var(--green); border: 1px solid var(--green); }
+    .sub-banner.warn { background: var(--amber-soft); color: var(--amber); border: 1px solid var(--amber); }
+    .plan-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.1rem; margin-bottom: 1.6rem; }
+    .plan-card { position: relative; }
+    .plan-card .plan-name { font-size: 1.05rem; font-weight: 800; margin: 0 0 0.3rem; }
+    .plan-card .plan-price { font-family: var(--font-mono); font-size: 1.9rem; font-weight: 700; margin: 0 0 1rem; }
+    .plan-card .plan-price small { font-family: var(--font-sans); font-size: 0.82rem; font-weight: 500; color: var(--muted); }
+    .plan-card ul { list-style: none; padding: 0; margin: 0 0 1.3rem; display: flex; flex-direction: column; gap: 0.5rem; }
+    .plan-card li { font-size: 0.85rem; display: flex; gap: 0.5rem; align-items: flex-start; }
+    .plan-card li svg { flex-shrink: 0; color: var(--green); margin-top: 0.15rem; }
+    .current-badge { position: absolute; top: -10px; right: 1.2rem; background: var(--accent); color: #fff;
+      font-size: 0.65rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; padding: 0.25rem 0.6rem; border-radius: 999px; }
+    @media (max-width: 700px) { .plan-cards { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body class="brand-{{ brand_space|default('metabot') }}">
+  <div class="corner-logo-wrap" aria-hidden="true">
+    <img class="corner-logo" src="{{ url_for('static', filename=brand_icon|default('img/metabot-icon-192.png')) }}" alt="">
+  </div>
+  <header class="topbar">
+    <div class="topbar-glow" aria-hidden="true"></div>
+    <div class="brand">
+      <img class="brand-mark" src="{{ url_for('static', filename=brand_icon|default('img/metabot-icon-192.png')) }}" alt="{{ page_title|default('Metabot') }}">
+      <span class="brand-name">{{ brand_label|default('Meta<strong>bot</strong>')|safe }}</span>
+    </div>
+    <div class="topbar-right">
+      <a class="link" href="{{ url_for('dashboard') }}">Volver al panel</a>
+      <span class="user-chip" id="user-chip">{{ username[:1]|upper }}</span>
+      <a class="link" href="{{ url_for('logout') }}">Salir</a>
+    </div>
+  </header>
+
+  <main class="sub-wrap">
+    <div class="sub-head">
+      <h1>Tu suscripción</h1>
+      <p>Administrá tu plan de Metabot, métodos de pago y cancelación.</p>
+    </div>
+
+    {% if checkout == 'ok' %}
+      <div class="sub-banner ok">¡Listo! Tu pago se procesó y tu plan Pro ya está activo.</div>
+    {% elif firmado == 'ok' %}
+      <div class="sub-banner ok">Firma recibida — ya podés continuar y suscribirte a Pro.</div>
+    {% elif checkout == 'cancelado' %}
+      <div class="sub-banner warn">Cerraste el checkout sin completar el pago — no se cobró nada.</div>
+    {% elif canceled == 'ok' %}
+      <div class="sub-banner warn">Tu suscripción Pro va a cancelarse al final del período ya pagado. Seguís teniendo acceso hasta esa fecha.</div>
+    {% elif error == 'procesador_no_configurado' %}
+      <div class="sub-banner warn">El procesador de pagos todavía no está activado — estamos terminando de configurarlo. Probá de nuevo más tarde.</div>
+    {% elif error == 'no_se_pudo_cancelar' %}
+      <div class="sub-banner warn">No pudimos procesar la cancelación. Escribinos por soporte si el problema sigue.</div>
+    {% endif %}
+
+    {% if not billing_configured and plan != 'pro' %}
+    <div class="sub-banner warn">
+      El cobro automático con tarjeta todavía no está activado en el sistema — estamos terminando de configurar el procesador de pagos.
+      El plan Pro va a quedar disponible para suscribirse en cuanto esté listo.
+    </div>
+    {% endif %}
+
+    <div class="plan-cards">
+      <div class="card plan-card">
+        {% if plan != 'pro' %}<span class="current-badge">Tu plan actual</span>{% endif %}
+        <div class="plan-name">Gratis</div>
+        <div class="plan-price">$0<small>&nbsp;/ mes</small></div>
+        <ul>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Cuenta de papel-trading, capital simulado</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Watchlist personalizada</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Panel en vivo, historial de operaciones</li>
+        </ul>
+      </div>
+
+      <div class="card plan-card">
+        {% if plan == 'pro' %}<span class="current-badge">Tu plan actual</span>{% endif %}
+        <div class="plan-name">Pro</div>
+        <div class="plan-price">${{ pro_price }}<small>&nbsp;/ mes</small></div>
+        <ul>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Todo lo del plan gratis</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Conexión con tu cuenta real de corretaje</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Soporte prioritario</li>
+        </ul>
+
+        {% if plan == 'pro' %}
+          {% if subscription_status == 'canceling' %}
+            <p class="muted small">Se cancela el {{ plan_current_period_end[:10] if plan_current_period_end else 'final del período actual' }}. Seguís con acceso Pro hasta esa fecha.</p>
+          {% else %}
+            <form method="post" action="{{ url_for('subscription_cancel') }}" onsubmit="return confirm('¿Cancelar tu suscripción Pro? Mantenés el acceso hasta el final del período ya pagado.');">
+              <button type="submit" class="btn-danger" style="width:100%;">Cancelar suscripción</button>
+            </form>
+          {% endif %}
+        {% else %}
+          <form method="post" action="{{ url_for('subscription_start_pro') }}">
+            <button type="submit" class="btn-secondary" style="width:100%;" {{ 'disabled' if not billing_configured else '' }}>
+              {{ 'Suscribirme a Pro' if billing_configured else 'Próximamente' }}
+            </button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if signed_terms %}
+    <p class="muted small">
+      <span style="color: var(--green);">✓ Términos firmados</span> el {{ signed_terms.signed_at[:10] }} por {{ signed_terms.full_name }} —
+      <a href="{{ url_for('download_my_signed_terms') }}" style="text-decoration:underline;">descargar el PDF que firmaste</a>.
+    </p>
+    {% endif %}
+
+    {% if plan == 'pro' %}
+      {% if not signed_terms %}
+      <div class="card" style="margin-top:1.2rem;">
+        <h2 style="font-size:1rem; margin:0 0 0.5rem;">Falta un paso: firmar los Términos</h2>
+        <p class="muted small">Antes de conectar tu broker tenés que leer y firmar los Términos y Condiciones vigentes.</p>
+        <a class="btn" href="{{ url_for('sign_terms', next='pro') }}" style="display:inline-block; text-decoration:none; margin-top:0.6rem; padding:0.6rem 1rem; border-radius:var(--radius-sm); background:var(--accent); color:#fff; font-weight:600; font-size:0.88rem;">Firmar Términos</a>
+      </div>
+      {% else %}
+      <div class="card" id="broker-section" style="margin-top:1.2rem;">
+        <h2 style="font-size:1rem; margin:0 0 0.5rem;">Conectar mi broker</h2>
+        <p class="muted small" style="margin-top:0;">Podés conectar tu cuenta de Tradier en modo Sandbox (práctica — el bot opera con datos de mercado reales pero capital simulado) y, por separado, tu cuenta de Producción para cuando decidas operar con dinero real. El token de cada una se genera vos mismo desde tradier.com, sección API Access — Metabot nunca te pide tu contraseña de Tradier. Se guardan cifrados; solo vos y el administrador pueden ver que están conectados, nadie más puede leer tus tokens.</p>
+
+        <div class="broker-slot" data-env="paper" style="margin-top:1rem; padding-top:1rem; border-top:1px dashed var(--border);">
+          <h3 style="font-size:0.9rem; margin:0 0 0.5rem;">Sandbox (práctica / virtual)</h3>
+          <div class="broker-connected-view" hidden>
+            <p><span class="status-pill on"><span class="dot"></span>Conectado</span> — cuenta <strong class="broker-account-id">—</strong></p>
+            <button class="btn-danger broker-disconnect-btn" type="button">Desconectar</button>
+          </div>
+          <div class="broker-connect-view">
+            <input type="password" class="text-input broker-token-input" style="width:100%;" autocomplete="off" placeholder="Tu token de Tradier (sandbox)">
+            <p class="settings-error broker-error" hidden></p>
+            <button class="btn-secondary broker-connect-btn" type="button" style="margin-top:0.6rem;">Conectar sandbox</button>
+          </div>
+        </div>
+
+        <div class="broker-slot" data-env="live" style="margin-top:1rem; padding-top:1rem; border-top:1px dashed var(--border);">
+          <h3 style="font-size:0.9rem; margin:0 0 0.5rem;">Producción (cuenta real)</h3>
+          <div class="broker-connected-view" hidden>
+            <p><span class="status-pill on"><span class="dot"></span>Conectado</span> — cuenta <strong class="broker-account-id">—</strong></p>
+            <div class="danger-zone" style="border-top:1px dashed var(--border); margin-top:0.8rem; padding-top:0.8rem;">
+              <p class="danger-zone-title broker-live-label" style="color:var(--amber);">Operar con dinero real: apagado</p>
+              <p class="muted small">Una vez activado, el bot abre y cierra posiciones de verdad en tu cuenta de Tradier, con tu dinero real. Podés apagarlo en cualquier momento. Mientras esté encendido, tu cuenta simulada (sandbox o paper money) se pausa — nunca operan las dos a la vez.</p>
+              <button class="btn-secondary broker-live-toggle-btn" type="button">Activar operar con dinero real</button>
+            </div>
+            <button class="btn-danger broker-disconnect-btn" type="button" style="margin-top:0.8rem;">Desconectar</button>
+          </div>
+          <div class="broker-connect-view">
+            <input type="password" class="text-input broker-token-input" style="width:100%;" autocomplete="off" placeholder="Tu token de Tradier (producción)">
+            <p class="settings-error broker-error" hidden></p>
+            <button class="btn-secondary broker-connect-btn" type="button" style="margin-top:0.6rem;">Conectar producción</button>
+          </div>
+        </div>
+
+        <div id="broker-next-step" hidden style="margin-top:1.2rem; padding-top:1rem; border-top:1px dashed var(--border); text-align:center;">
+          <p class="muted small" style="margin:0 0 0.6rem;">✓ Listo, ya tenés tu broker conectado.</p>
+          <a class="btn" href="{{ url_for('my_dashboard') }}" style="display:inline-block; text-decoration:none; padding:0.7rem 1.4rem; border-radius:var(--radius-sm); background:var(--accent); color:#fff; font-weight:700; font-size:0.95rem;">Siguiente: ir a mi panel →</a>
+        </div>
+      </div>
+      {% endif %}
+    {% endif %}
+
+    <p class="muted small">Métodos de pago aceptados: tarjeta de crédito o débito, PayPal, Google Pay y Apple Pay.</p>
+    <p class="muted small">El cobro, la renovación automática y la cancelación se rigen por los
+      <a href="{{ url_for('terms') }}" style="text-decoration:underline;">Términos y Condiciones</a>, sección 3 y 18.
+      El checkout de pago lo procesa Stripe de forma segura — Metabot nunca guarda el número de tu tarjeta.</p>
+  </main>
+
+  <script>
+    // 2026-10-11, a pedido explicito ("dos campos separados, conexion
+    // simultanea"): sandbox (paper) y produccion (live) son dos slots
+    // independientes -- un usuario puede tener las dos conexiones
+    // activas a la vez (el backend ya lo permite, account_id distinto
+    // por ambiente). Cada .broker-slot se wirea solo con los datos de
+    // SU propio env (data-env="paper"|"live").
+    const brokerSlots = document.querySelectorAll(".broker-slot");
+
+    function wireBrokerSlot(slot) {
+      const env = slot.dataset.env; // "paper" o "live"
+      const connectedView = slot.querySelector(".broker-connected-view");
+      const connectView = slot.querySelector(".broker-connect-view");
+      const accountIdEl = slot.querySelector(".broker-account-id");
+      const tokenInput = slot.querySelector(".broker-token-input");
+      const errorEl = slot.querySelector(".broker-error");
+      const connectBtn = slot.querySelector(".broker-connect-btn");
+      const disconnectBtn = slot.querySelector(".broker-disconnect-btn");
+      const liveLabel = slot.querySelector(".broker-live-label");
+      const liveToggleBtn = slot.querySelector(".broker-live-toggle-btn");
+      let activeConnectionId = null;
+      let liveEnabled = false;
+
+      function renderLiveState() {
+        if (!liveLabel || !liveToggleBtn) return;
+        if (liveEnabled) {
+          liveLabel.textContent = "Operar con dinero real: encendido";
+          liveLabel.style.color = "var(--green)";
+          liveToggleBtn.textContent = "Apagar operar con dinero real";
+          liveToggleBtn.className = "btn-danger broker-live-toggle-btn";
+        } else {
+          liveLabel.textContent = "Operar con dinero real: apagado";
+          liveLabel.style.color = "var(--amber)";
+          liveToggleBtn.textContent = "Activar operar con dinero real";
+          liveToggleBtn.className = "btn-secondary broker-live-toggle-btn";
+        }
+      }
+
+      function render(active) {
+        if (active) {
+          activeConnectionId = active.id;
+          accountIdEl.textContent = active.account_id;
+          liveEnabled = !!active.live_trading_enabled;
+          renderLiveState();
+          connectedView.hidden = false;
+          connectView.hidden = true;
+        } else {
+          activeConnectionId = null;
+          connectedView.hidden = true;
+          connectView.hidden = false;
+        }
+      }
+
+      if (connectBtn) {
+        connectBtn.addEventListener("click", async () => {
+          const token = tokenInput.value.trim();
+          if (!token) {
+            errorEl.textContent = "Pegá tu token de Tradier primero.";
+            errorEl.hidden = false;
+            return;
+          }
+          errorEl.hidden = true;
+          connectBtn.disabled = true;
+          const originalLabel = connectBtn.textContent;
+          connectBtn.textContent = "Conectando...";
+          try {
+            const res = await fetch("/api/broker/connect", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token, env: env === "live" ? "production" : "sandbox" }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+              errorEl.textContent = data.error || "No se pudo conectar.";
+              errorEl.hidden = false;
+            } else {
+              await refreshAllSlots();
+            }
+          } catch (e) {
+            errorEl.textContent = "Error de red al intentar conectar.";
+            errorEl.hidden = false;
+          } finally {
+            connectBtn.disabled = false;
+            connectBtn.textContent = originalLabel;
+          }
+        });
+      }
+
+      if (disconnectBtn) {
+        disconnectBtn.addEventListener("click", async () => {
+          if (activeConnectionId == null) return;
+          if (!confirm("¿Desconectar esta cuenta de Tradier? Se apaga también \"operar con dinero real\" si estaba encendido.")) return;
+          disconnectBtn.disabled = true;
+          try {
+            await fetch("/api/broker/disconnect", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ connection_id: activeConnectionId }),
+            });
+            await refreshAllSlots();
+          } finally {
+            disconnectBtn.disabled = false;
+          }
+        });
+      }
+
+      if (liveToggleBtn) {
+        liveToggleBtn.addEventListener("click", async () => {
+          if (activeConnectionId == null) return;
+          const next = !liveEnabled;
+          const msg = next
+            ? "¿Activar operar con dinero real? El bot va a abrir y cerrar posiciones de verdad en tu cuenta de Tradier, con tu dinero real -- y tu cuenta simulada (sandbox o paper money) se PAUSA mientras tanto, nunca van a operar las dos a la vez."
+            : "¿Volver a tu cuenta simulada? Se apaga el dinero real -- el bot deja de operar en tu cuenta de Tradier y vuelve a operar solo con capital virtual.";
+          if (!confirm(msg)) return;
+          liveToggleBtn.disabled = true;
+          try {
+            const res = await fetch("/api/broker/live-trading", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ connection_id: activeConnectionId, enabled: next }),
+            });
+            const data = await res.json();
+            if (res.ok && data.ok) {
+              liveEnabled = data.enabled;
+              renderLiveState();
+            }
+          } finally {
+            liveToggleBtn.disabled = false;
+          }
+        });
+      }
+
+      return { env, render };
+    }
+
+    const brokerSlotHandles = Array.from(brokerSlots).map(wireBrokerSlot);
+    const brokerNextStep = document.getElementById("broker-next-step");
+
+    async function refreshAllSlots() {
+      let data = null;
+      try {
+        const res = await fetch("/api/broker/status");
+        if (res.ok) data = await res.json();
+      } catch (e) { /* red caida -- cada slot se queda en su vista de conectar */ }
+      const connections = (data && data.connections) || [];
+      brokerSlotHandles.forEach((handle) => {
+        const active = connections.find((c) => c.status === "active" && c.env === handle.env);
+        handle.render(active || null);
+      });
+      if (brokerNextStep) {
+        brokerNextStep.hidden = !connections.some((c) => c.status === "active");
+      }
+    }
+    if (brokerSlotHandles.length) refreshAllSlots();
+  </script>
+</body>
+</html>

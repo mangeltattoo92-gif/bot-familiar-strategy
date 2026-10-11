@@ -11,6 +11,91 @@ repetir en 3 meses.
 
 ---
 
+## 2026-09-17 #3 -- salidas evaluadas fuera de horario de mercado (COST, doble venta erronea)
+
+**Sintoma:** COST se vendio por stop-loss a las 4:08pm ET (-20.64%) y,
+tras reabrir la posicion para corregirlo, se volvio a vender sola a las
+6:07pm ET (-27.05%), disparando ademas un circuit breaker en una cuenta
+por perdida diaria.
+
+**Causa raiz:** `too_close_to_open_new_position()` (bollinger_strategy.py)
+ya bloqueaba ENTRADAS nuevas fuera de horario (ver incidente 2026-09-17 #2
+mas abajo), pero `run_exits_for_account()` (multi_user_entry.py), que
+revisa las posiciones YA ABIERTAS para cerrarlas por stop-loss/objetivo,
+nunca tuvo ese chequeo -- corria 24/7 sin parar. Despues de las 4pm ET,
+yfinance sigue devolviendo "cotizaciones" con volumen 0 (confirmado con
+datos reales: la barra de 3:55-4:00pm de COST tuvo 184,493 de volumen
+real, la de las 4:00pm en adelante tuvo 0) -- el motor de salidas tomaba
+esas cotizaciones sin liquidez real como si fueran validas.
+
+**Fix:** `market_is_open_now()` (multi_user_entry.py) -- mismo criterio
+que las entradas (9:30am-4:00pm ET, dia de mercado real via
+`is_trading_day`/`market_close_time`) -- ahora se chequea al inicio de
+`run_exits_for_account()`. Fuera de esa ventana, la funcion devuelve 0
+sin evaluar nada. Las dos ventas erroneas se revirtieron a mano en las 6
+cuentas afectadas (trade de venta borrado, cash/realized_pnl restaurados,
+posicion reinsertada con su profit_target_pct/stop_loss_pct originales
+recuperados del texto de la razon de la compra).
+
+**Leccion:** un limite de horario agregado de un lado (entradas) no
+protege el otro lado (salidas) -- son dos rutas de codigo separadas. Toda
+verificacion de "el mercado esta abierto" tiene que aplicarse a CADA
+punto donde el sistema decide actuar sobre datos de precio, no solo a
+donde se abren posiciones nuevas.
+
+---
+
+## 2026-09-17 #2 -- contrato de respaldo con spread ancho sin filtro propio (V, -22.6%)
+
+**Sintoma:** V se compro por el camino de respaldo (delta fuera del
+rango ideal 0.40-0.50) y perdio valor solo por el spread bid/ask, sin
+que el mercado se moviera -- 22.6% de spread minutos despues de la
+entrada (comprar al ask y marcar al bid ya perdia esa diferencia).
+
+**Causa raiz:** `option_selection.py` ya tenia `MAX_SPREAD_PCT = 0.15`
+(agregado 2026-09-11 tras el incidente de NIO), pero se aplicaba por
+igual al camino ideal Y al camino de respaldo. Un contrato de respaldo ya
+es de peor calidad por el delta -- exigirle el mismo spread flojo que al
+camino ideal combina dos riesgos a la vez.
+
+**Fix:** `MAX_SPREAD_PCT_FALLBACK = 0.10` -- limite mas estricto SOLO
+para el camino de respaldo. Si ningun candidato del respaldo cumple ese
+limite mas estricto, se usa el conjunto completo igual (no bloquea la
+entrada si no hay alternativa mejor, mismo criterio que ya existia para
+liquidez).
+
+**Leccion:** un filtro de calidad (spread, liquidez) no puede tener un
+solo umbral para TODOS los caminos de seleccion de contrato -- un camino
+de respaldo, que ya acepta peor delta, necesita ser mas exigente en lo
+demas, no igual de permisivo.
+
+---
+
+## 2026-09-17 #1 -- entradas de madrugada con datos de sesion anterior (10 posiciones perdidas)
+
+**Sintoma:** 10 operaciones se abrieron entre las 12:00am y 12:16am ET,
+todas perdedoras, usando la señal giro_sma20 con datos de la ultima vela
+de 15m de la sesion ANTERIOR contra precios de fuera de horario sin
+movimiento real.
+
+**Causa raiz:** `too_close_to_open_new_position()` solo calculaba
+"cuantos minutos faltan para el cierre de HOY" -- a las 12:16am, faltan
+matematicamente ~943 minutos para las 4pm de HOY, asi que devolvia
+`False` (permitido) sin verificar nunca si el mercado estaba realmente
+abierto en ese momento.
+
+**Fix:** se agrego el chequeo real `MARKET_OPEN_BAR_TIME <= now.time() <=
+market_close_time(day)` mas `is_trading_day(day)`, ademas del calculo de
+minutos-hasta-el-cierre que ya existia.
+
+**Leccion:** "minutos hasta el cierre" y "el mercado esta abierto ahora"
+son preguntas DISTINTAS -- la primera puede dar un numero grande y
+positivo (pareciendo seguro) incluso cuando la segunda es claramente
+falsa. Ver tambien incidente 2026-09-17 #3: el mismo tipo de hueco
+aparecio de nuevo del lado de las salidas unas horas despues.
+
+---
+
 ## 2026-09-09 #8 -- re-entrada inmediata sobre la misma señal (HOOD)
 
 **Sintoma:** HOOD cerro con +10.27% de ganancia (`objetivo_alcanzado`) y

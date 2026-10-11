@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Firmar Términos — Metabot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="icon" href="{{ url_for('static', filename='img/metabot-logo.ico') }}">
+  <link rel="stylesheet" href="{{ asset_url('css/style.css') }}">
+  <meta name="theme-color" content="#0b0d12">
+  <style>
+    .sign-wrap { max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+    .sign-wrap h1 { font-size: 1.35rem; margin: 0 0 0.3rem; }
+    .sign-wrap .meta { color: var(--muted); font-size: 0.82rem; margin-bottom: 1.4rem; }
+    .terms-scroll {
+      max-height: 340px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-md);
+      background: var(--panel-2); padding: 1rem 1.2rem; margin-bottom: 1.2rem;
+    }
+    .terms-scroll h3 { font-size: 0.85rem; margin: 0.9rem 0 0.3rem; color: var(--text); }
+    .terms-scroll h3:first-child { margin-top: 0; }
+    .terms-scroll p { font-size: 0.82rem; line-height: 1.55; color: var(--muted); margin: 0.3rem 0; }
+    .sig-field label { display: block; font-size: 0.8rem; color: var(--muted); margin: 1rem 0 0.4rem; font-weight: 500; }
+    #sig-pad {
+      width: 100%; height: 160px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: #fff; touch-action: none; cursor: crosshair; display: block;
+    }
+    .sig-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 0.4rem; }
+    .accept-row { display: flex; align-items: flex-start; gap: 0.6rem; margin-top: 1.2rem; }
+    .accept-row input[type="checkbox"] { margin-top: 0.2rem; width: 16px; height: 16px; flex-shrink: 0; }
+    .accept-row label { font-size: 0.85rem; line-height: 1.5; color: var(--text); }
+    .sign-error { color: var(--red); font-size: 0.85rem; margin-top: 0.8rem; }
+    .signed-ok { background: var(--green-soft); border: 1px solid var(--green); border-radius: var(--radius-md); padding: 1rem 1.2rem; font-size: 0.88rem; }
+  </style>
+</head>
+<body>
+  <div class="sign-wrap">
+    <a class="link" href="{{ url_for('dashboard') }}">&larr; Volver al panel</a>
+    <h1>Firmar Términos y Condiciones</h1>
+    <p class="meta">Metabot · Versión {{ terms_version }} · Tenés que leer y firmar esto antes de suscribirte a Pro y conectar tu broker.</p>
+
+    {% if signed %}
+      <div class="signed-ok">
+        <strong>✓ Ya firmaste esta versión</strong> el {{ signed.signed_at[:10] }}, como {{ signed.full_name }}.
+        <br><a href="{{ url_for('download_my_signed_terms') }}" style="text-decoration:underline; color: var(--green);">Descargar el PDF que firmaste</a> ·
+        <a href="{{ url_for('subscription') }}" style="text-decoration:underline; color: var(--green);">Continuar</a>
+      </div>
+    {% else %}
+      <div class="terms-scroll" id="terms-scroll">
+        {% for heading, body in sections %}
+          <h3>{{ heading }}</h3>
+          {% for para in body.split('\n\n') %}
+            <p>{{ para }}</p>
+          {% endfor %}
+        {% endfor %}
+      </div>
+
+      {% if error %}<p class="sign-error">{{ error }}</p>{% endif %}
+
+      <form method="post" id="sign-form" action="{{ url_for('sign_terms', next=next) }}">
+        <div class="sig-field">
+          <label for="full_name">Nombre completo</label>
+          <input type="text" id="full_name" name="full_name" class="text-input" style="width:100%;" value="{{ full_name }}" required>
+        </div>
+
+        <div class="sig-field">
+          <label for="sig-pad">Firma (dibujá con el mouse o el dedo)</label>
+          <canvas id="sig-pad" width="640" height="160"></canvas>
+          <div class="sig-actions">
+            <button type="button" class="link" id="sig-clear" style="padding:0.3rem 0;">Borrar y firmar de nuevo</button>
+          </div>
+        </div>
+        <input type="hidden" name="signature_data_url" id="signature_data_url">
+
+        <div class="accept-row">
+          <input type="checkbox" id="accepted" name="accepted" required>
+          <label for="accepted">Leído y firmado — declaro que leí este documento en su totalidad, entiendo los riesgos descritos, y acepto operar bajo mi propia responsabilidad y bajo estos Términos.</label>
+        </div>
+
+        <button type="submit" class="btn-secondary" style="margin-top:1.2rem;" id="sign-submit">Firmar y enviar</button>
+      </form>
+    {% endif %}
+  </div>
+
+  <script>
+    const canvas = document.getElementById('sig-pad');
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = '#14171f';
+      let drawing = false, hasDrawn = false;
+
+      function pos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const p = e.touches ? e.touches[0] : e;
+        return { x: (p.clientX - rect.left) * scaleX, y: (p.clientY - rect.top) * scaleY };
+      }
+      function start(e) { e.preventDefault(); drawing = true; hasDrawn = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+      function move(e) { if (!drawing) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }
+      function end() { drawing = false; }
+
+      canvas.addEventListener('mousedown', start);
+      canvas.addEventListener('mousemove', move);
+      canvas.addEventListener('mouseup', end);
+      canvas.addEventListener('mouseleave', end);
+      canvas.addEventListener('touchstart', start, { passive: false });
+      canvas.addEventListener('touchmove', move, { passive: false });
+      canvas.addEventListener('touchend', end);
+
+      document.getElementById('sig-clear').addEventListener('click', () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        hasDrawn = false;
+      });
+
+      document.getElementById('sign-form').addEventListener('submit', (e) => {
+        if (!hasDrawn) {
+          e.preventDefault();
+          alert('Falta tu firma — dibujala en el recuadro antes de enviar.');
+          return;
+        }
+        document.getElementById('signature_data_url').value = canvas.toDataURL('image/png');
+      });
+    }
+  </script>
+</body>
+</html>

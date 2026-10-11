@@ -295,15 +295,17 @@ def check_and_heal_once() -> list[str]:
             _log(msg)
             log_error(message=msg, reason="watchdog.py: auto-reparacion")
 
-    # Chequeos de solo-reporte -- no se auto-reparan (corregir datos de
-    # cuenta a ciegas es mas riesgoso que dejarlo para revision humana).
-    for problems, label in (
-        (hc.check_account_math(), "Matematica de la cuenta"),
-        (hc.check_duplicate_positions(), "Posiciones duplicadas"),
+    # 2026-10-05: autocorrige (ver health_check.fix_account_math y
+    # fix_duplicate_positions -- ambas correcciones son deterministas,
+    # recalculadas desde el historial de trades, nada inventado).
+    for fixed, label in (
+        (hc.fix_account_math(), "Matematica de la cuenta"),
+        (hc.fix_duplicate_positions(), "Posiciones duplicadas"),
     ):
-        for p in problems:
-            _log(f"[REVISION MANUAL -- {label}] {p}")
-            log_error(message=p, reason=f"watchdog.py: {label} (no auto-reparable)")
+        for f in fixed:
+            actions.append(f)
+            _log(f"[AUTO-CORREGIDO -- {label}] {f}")
+            log_error(message=f, reason=f"watchdog.py: {label} (auto-reparado)")
 
     backup_error = sync_backup()
     if backup_error:

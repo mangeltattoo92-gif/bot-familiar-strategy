@@ -37,7 +37,15 @@ def _connect(db_path: Path = DEFAULT_DB) -> sqlite3.Connection:
         )
         """
     )
-    conn.commit()
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(broker_connections)")}
+    if "live_trading_enabled" not in cols:
+        # 2026-10-07, a pedido explicito ("despues va a elegir operar
+        # dinero real para que el bot trabaje"): conectar el broker solo
+        # guarda el token -- el usuario decide APARTE, con un interruptor
+        # propio, si quiere que el bot de verdad opere con esa cuenta.
+        # 0 por defecto: conectar nunca activa operar solo.
+        conn.execute("ALTER TABLE broker_connections ADD COLUMN live_trading_enabled INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
     return conn
 
 
@@ -77,11 +85,80 @@ def list_connections(user_id: int, db_path: Path = DEFAULT_DB) -> list[dict[str,
     conn = _connect(db_path)
     try:
         rows = conn.execute(
-            "SELECT id, broker, account_id, env, status, connected_at, revoked_at FROM broker_connections "
-            "WHERE user_id = ? ORDER BY id",
+            "SELECT id, broker, account_id, env, status, connected_at, revoked_at, live_trading_enabled "
+            "FROM broker_connections WHERE user_id = ? ORDER BY id",
             (user_id,),
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def tradier_paper_usernames(db_path: Path = DEFAULT_DB) -> set[str]:
+    """2026-10-11, a pedido explicito ("para que el usuario pueda trabajar
+    con la de paper money hay que agregar la sandbox"): nombres de usuario
+    con una conexion Tradier activa en modo sandbox ("paper") -- se suman
+    al ciclo de datos de Tradier (ver tradier_cycle.py / _tradier_only_usernames
+    en multi_user_entry.py) en vez de yfinance, igual que la cuenta de
+    prueba original del admin. Nunca coincide con live_trading_usernames:
+    conectar en sandbox no activa dinero real."""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT u.username FROM broker_connections bc JOIN users u ON u.id = bc.user_id "
+            "WHERE bc.status = 'active' AND bc.broker = 'tradier' AND bc.env = 'paper'"
+        ).fetchall()
+        return {r["username"] for r in rows}
+    finally:
+        conn.close()
+
+
+def live_trading_usernames(db_path: Path = DEFAULT_DB) -> set[str]:
+    """2026-10-10, a pedido explicito ("si una funciona la otra no"): nombres
+    de usuario con el interruptor de dinero real encendido en alguna conexion
+    activa -- el motor simulado (multi_user_entry.py / tradier_cycle.py) los
+    excluye de su lista de cuentas mientras esto sea asi, para que nunca
+    corran los dos motores sobre la misma cuenta al mismo tiempo."""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT u.username FROM broker_connections bc JOIN users u ON u.id = bc.user_id "
+            "WHERE bc.status = 'active' AND bc.live_trading_enabled = 1"
+        ).fetchall()
+        return {r["username"] for r in rows}
+    finally:
+        conn.close()
+
+
+def list_live_trading_connections(db_path: Path = DEFAULT_DB) -> list[dict[str, Any]]:
+    """2026-10-10, para real_trading_engine.py: TODAS las conexiones activas
+    de TODOS los usuarios con el interruptor de dinero real encendido --
+    el motor las recorre una por una cada ciclo. Nunca devuelve tokens
+    (eso sigue pasando solo por get_tokens, user por user)."""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT bc.id, bc.user_id, bc.broker, bc.account_id, bc.env, u.username FROM broker_connections bc "
+            "JOIN users u ON u.id = bc.user_id "
+            "WHERE bc.status = 'active' AND bc.live_trading_enabled = 1"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def set_live_trading(user_id: int, connection_id: int, enabled: bool, db_path: Path = DEFAULT_DB) -> bool:
+    """El usuario prende/apaga por su cuenta si el bot opera de verdad con
+    esta conexion -- separado de conectar el broker (eso solo guarda el
+    token). Solo afecta conexiones ACTIVAS del propio usuario."""
+    conn = _connect(db_path)
+    try:
+        cur = conn.execute(
+            "UPDATE broker_connections SET live_trading_enabled = ? WHERE id = ? AND user_id = ? AND status = 'active'",
+            (1 if enabled else 0, connection_id, user_id),
+        )
+        conn.commit()
+        return cur.rowcount == 1
     finally:
         conn.close()
 
@@ -107,7 +184,7 @@ def revoke_connection(user_id: int, connection_id: int, db_path: Path = DEFAULT_
     try:
         cur = conn.execute(
             "UPDATE broker_connections SET status = 'revoked', revoked_at = ?, data_blob = NULL, "
-            "wrapped_dek = NULL WHERE id = ? AND user_id = ? AND status = 'active'",
+            "wrapped_dek = NULL, live_trading_enabled = 0 WHERE id = ? AND user_id = ? AND status = 'active'",
             (_now(), connection_id, user_id),
         )
         conn.commit()

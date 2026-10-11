@@ -147,11 +147,28 @@ def _save_disk_cache(path: Path, data: dict) -> None:
         pass  # el cache es una optimizacion -- si falla, se sigue pidiendo la red normal
 
 
+# 2026-10-07, mismo mecanismo que en option_selection.py: override opcional
+# para que tradier_cycle.py calcule precios de salida (get_option_price /
+# get_option_bid_ask, mas abajo) con la cadena de Tradier en vez de
+# yfinance, para una cuenta especifica. None preserva yfinance siempre.
+_ACTIVE_CHAIN_FETCHER = None
+
+
+def set_active_chain_fetcher(fetcher) -> None:
+    """fetcher: callable(underlying, expiration) -> chain con .calls/.puts
+    (mismas columnas que yf.Ticker().option_chain()), o None para una
+    cadena vacia si ese vencimiento no esta disponible."""
+    global _ACTIVE_CHAIN_FETCHER
+    _ACTIVE_CHAIN_FETCHER = fetcher
+
+
 def _get_option_chain_cached(underlying: str, expiration: str):
     """Cadena de opciones (calls/puts) con cache de 2 niveles: memoria del
     proceso actual (mas rapido) y disco (compartido entre procesos/ciclos
     distintos dentro del mismo TTL). Devuelve un objeto con .calls/.puts
     (DataFrames), igual que yf.Ticker(...).option_chain(...)."""
+    if _ACTIVE_CHAIN_FETCHER is not None:
+        return _ACTIVE_CHAIN_FETCHER(underlying, expiration)
     cache_key = f"{underlying}_{expiration}"
     now = time.time()
 
@@ -400,6 +417,36 @@ def get_top_etfs_for_day_trading(limit: int = 8) -> list[dict]:
 
 _WATCHLIST_TTL = 60  # segundos
 
+# 2026-10-01, a pedido del usuario tras un error real en el panel (F salio
+# "possibly delisted" en yfinance a las 5:32pm ET -- F es un ticker real y
+# liquido, ese dia mismo gano +13.99% en una entrada real; fue un hipo
+# transitorio de Yahoo, no una caida real). Dos huecos reales encontrados:
+#   1) yf.download() del lote completo puede fallar por una excepcion de
+#      red/rate-limit -- antes _compute() devolvia [] de una, sin reintentar.
+#   2) Un simbolo especifico puede venir vacio DENTRO de un lote que SI
+#      tuvo exito en general (como F ese dia) -- antes ese simbolo
+#      simplemente desaparecia de la lista esa vuelta, sin avisar.
+# Ahora: 1 reintento del lote completo antes de rendirse, y un cache de
+# "ultimo dato bueno" POR SIMBOLO (separado del cache de TTL de toda la
+# lista) para no perder un ticker de la vista solo por un hipo puntual --
+# se marca is_stale=True para que el panel pueda mostrarlo distinto si
+# quiere, sin fingir que es un dato fresco.
+_WATCHLIST_BATCH_RETRIES = 1
+_WATCHLIST_RETRY_DELAY = 2.0  # segundos
+_last_good_symbol_data: dict[str, dict] = {}
+
+
+def _download_watchlist_batch(symbols: list[str]):
+    last_exc = None
+    for attempt in range(_WATCHLIST_BATCH_RETRIES + 1):
+        try:
+            return _with_timeout(lambda: yf.download(symbols, period="5d", group_by="ticker", threads=True, progress=False))
+        except Exception as e:
+            last_exc = e
+            if attempt < _WATCHLIST_BATCH_RETRIES:
+                time.sleep(_WATCHLIST_RETRY_DELAY)
+    raise last_exc
+
 
 def get_watchlist_overview(symbols: list[str]) -> list[dict]:
     """Vista en vivo (precio, cambio, volumen, volatilidad) de una lista
@@ -409,32 +456,44 @@ def get_watchlist_overview(symbols: list[str]) -> list[dict]:
     """
     def _compute():
         try:
-            data = _with_timeout(lambda: yf.download(symbols, period="5d", group_by="ticker", threads=True, progress=False))
+            data = _download_watchlist_batch(symbols)
         except Exception:
-            return []
+            data = None
 
         results = []
         for symbol in symbols:
-            try:
-                hist = data[symbol].dropna() if len(symbols) > 1 else data.dropna()
-                if len(hist) < 2:
-                    continue
-                last_close = float(hist["Close"].iloc[-1])
-                prev_close = float(hist["Close"].iloc[-2])
-                day_change_pct = (last_close / prev_close - 1) * 100
-                week_change_pct = (last_close / float(hist["Close"].iloc[0]) - 1) * 100
-                avg_volume = float(hist["Volume"].mean())
-                avg_range_pct = float(((hist["High"] - hist["Low"]) / hist["Close"]).mean() * 100)
-                results.append({
-                    "symbol": symbol,
-                    "last_close": round(last_close, 2),
-                    "day_change_pct": round(day_change_pct, 2),
-                    "week_change_pct": round(week_change_pct, 2),
-                    "avg_volume": int(avg_volume),
-                    "avg_daily_range_pct": round(avg_range_pct, 2),
-                })
-            except Exception:
-                continue
+            entry = None
+            if data is not None:
+                try:
+                    hist = data[symbol].dropna() if len(symbols) > 1 else data.dropna()
+                    if len(hist) >= 2:
+                        last_close = float(hist["Close"].iloc[-1])
+                        prev_close = float(hist["Close"].iloc[-2])
+                        day_change_pct = (last_close / prev_close - 1) * 100
+                        week_change_pct = (last_close / float(hist["Close"].iloc[0]) - 1) * 100
+                        avg_volume = float(hist["Volume"].mean())
+                        avg_range_pct = float(((hist["High"] - hist["Low"]) / hist["Close"]).mean() * 100)
+                        entry = {
+                            "symbol": symbol,
+                            "last_close": round(last_close, 2),
+                            "day_change_pct": round(day_change_pct, 2),
+                            "week_change_pct": round(week_change_pct, 2),
+                            "avg_volume": int(avg_volume),
+                            "avg_daily_range_pct": round(avg_range_pct, 2),
+                            "is_stale": False,
+                        }
+                except Exception:
+                    entry = None
+
+            if entry is not None:
+                _last_good_symbol_data[symbol] = entry
+                results.append(entry)
+            else:
+                fallback = _last_good_symbol_data.get(symbol)
+                if fallback is not None:
+                    results.append({**fallback, "is_stale": True})
+                # Sin fallback (nunca se vio este simbolo antes): se omite
+                # igual que antes, no hay nada razonable que mostrar.
         return results
 
     cache_key = f"watchlist_{'_'.join(symbols)}"

@@ -11,8 +11,9 @@ ni compras que dejen el cash virtual en negativo, salvo --force.
 
 import sqlite3
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "paper_trading.db"
 
@@ -73,7 +74,8 @@ def init_db(initial_balance: float, db_path: Path = DEFAULT_DB_PATH, reset: bool
                 profit_target_pct REAL,
                 stop_loss_pct REAL,
                 entry_delta REAL,
-                entry_theta REAL
+                entry_theta REAL,
+                entry_strategy TEXT
             );
 
             CREATE TABLE IF NOT EXISTS trades (
@@ -140,6 +142,33 @@ def _get_account(conn: sqlite3.Connection) -> sqlite3.Row:
     return row
 
 
+_ET = ZoneInfo("America/New_York")
+
+
+def _unsettled_proceeds(conn: sqlite3.Connection, now_iso: str | None = None) -> float:
+    """2026-10-05, a pedido explicito ("Robinhood no agrega la ganancia de
+    la prima ni el dinero que se uso hasta el otro dia"): en un broker real
+    (cuenta de efectivo, no margen -- la real del pilot) las opciones
+    liquidan en 1 dia habil, asi que el dinero que vuelve al cerrar una
+    posicion (ganancia O perdida, da igual) no se puede volver a usar para
+    comprar hasta el dia siguiente. Se simula aca: cada venta/cierre queda
+    "congelado" hasta las 5am hora de Nueva York del dia siguiente a esa
+    operacion -- se resta del cash disponible para comprar (NO del cash
+    balance real que se muestra en el panel, ese sigue siendo el total
+    verdadero de la cuenta)."""
+    now_dt = datetime.fromisoformat(now_iso) if now_iso else datetime.now(timezone.utc)
+    rows = conn.execute(
+        "SELECT timestamp, cash_effect FROM trades WHERE side = 'sell' AND cash_effect > 0"
+    ).fetchall()
+    frozen = 0.0
+    for r in rows:
+        trade_et = datetime.fromisoformat(r["timestamp"]).astimezone(_ET)
+        release_et = (trade_et + timedelta(days=1)).replace(hour=5, minute=0, second=0, microsecond=0)
+        if release_et.astimezone(timezone.utc) > now_dt:
+            frozen += r["cash_effect"]
+    return frozen
+
+
 def _ensure_positions_columns(conn: sqlite3.Connection) -> None:
     """Migracion ligera para bases de datos creadas antes de las columnas
     de day trading (opened_at, profit_target_pct, stop_loss_pct, entry_delta)."""
@@ -154,6 +183,16 @@ def _ensure_positions_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE positions ADD COLUMN entry_delta REAL")
     if "entry_theta" not in cols:
         conn.execute("ALTER TABLE positions ADD COLUMN entry_theta REAL")
+    if "entry_strategy" not in cols:
+        # 2026-09-22, a pedido del usuario ("porque smci se fue contrario"):
+        # falta esta columna en `positions` (ya existia en `trades`) para que
+        # el bucle de salidas de multi_user_entry.py sepa que estrategia abrio
+        # cada posicion. Sin esto, la regla 'rechazo_de_ruptura' (que compara
+        # el precio contra la banda de Bollinger) se aplicaba a TODAS las
+        # posiciones por igual, aunque solo squeeze_breakout/_temprano abren
+        # realmente rompiendo esa banda -- ver la nota junto a
+        # _squeeze_breakout_strategies en multi_user_entry.py.
+        conn.execute("ALTER TABLE positions ADD COLUMN entry_strategy TEXT")
 
 
 def _ensure_trades_columns(conn: sqlite3.Connection) -> None:
@@ -178,6 +217,35 @@ def _ensure_trades_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE trades ADD COLUMN entry_consecutive_squeeze_bars INTEGER")
     if "entry_strategy" not in cols:
         conn.execute("ALTER TABLE trades ADD COLUMN entry_strategy TEXT")
+    if "entry_implied_volatility" not in cols:
+        # 2026-09-18, a pedido del usuario ("como arreglamos lo de la
+        # prima impredecible"): antes no se guardaba la IV real de la
+        # entrada -- sin este dato no se puede validar con datos reales
+        # si conviene filtrar por IV inflada al elegir contrato.
+        conn.execute("ALTER TABLE trades ADD COLUMN entry_implied_volatility REAL")
+    if "entry_clv" not in cols:
+        # 2026-09-18, a pedido del usuario tras el caso MU: dos datos de la vela
+        # de señal, SOLO REGISTRO (no cambian ninguna decision) para validar en
+        # ~2 semanas si conviene filtrar entradas "en extremo":
+        # clv = donde cerro la vela dentro de su rango (1 = en el extremo a favor),
+        # day_pos = donde esta el precio dentro del rango del dia (1 = en el extremo).
+        conn.execute("ALTER TABLE trades ADD COLUMN entry_clv REAL")
+    if "entry_day_pos" not in cols:
+        conn.execute("ALTER TABLE trades ADD COLUMN entry_day_pos REAL")
+    # 2026-09-27, a pedido del usuario tras el estudio profundo de perdidas
+    # ("busca los datos que aun no tenemos... para perfeccionar"): 3 datos
+    # que antes se usaban solo en el momento de decidir y se descartaban --
+    # sin guardarlos, cada caso de "salto"/liquidez habia que investigarlo
+    # a mano cruzando logs y yfinance despues del hecho. Solo registro, no
+    # cambian ninguna decision de entrada.
+    if "entry_confidence" not in cols:
+        conn.execute("ALTER TABLE trades ADD COLUMN entry_confidence TEXT")
+    if "entry_spread_pct" not in cols:
+        conn.execute("ALTER TABLE trades ADD COLUMN entry_spread_pct REAL")
+    if "entry_open_interest" not in cols:
+        conn.execute("ALTER TABLE trades ADD COLUMN entry_open_interest INTEGER")
+    if "entry_vix" not in cols:
+        conn.execute("ALTER TABLE trades ADD COLUMN entry_vix REAL")
 
 
 def _record_trade_impl(
@@ -203,6 +271,13 @@ def _record_trade_impl(
     entry_volume_ratio: float | None = None,
     entry_consecutive_squeeze_bars: int | None = None,
     entry_strategy: str | None = None,
+    entry_implied_volatility: float | None = None,
+    entry_clv: float | None = None,
+    entry_day_pos: float | None = None,
+    entry_confidence: str | None = None,
+    entry_spread_pct: float | None = None,
+    entry_open_interest: int | None = None,
+    entry_vix: float | None = None,
     db_path: Path = DEFAULT_DB_PATH,
 ) -> dict:
     """Registra una operacion simulada y actualiza balance/posiciones/P&L.
@@ -228,6 +303,15 @@ def _record_trade_impl(
     ('squeeze_breakout' | 'gap_fade_apertura' | 'giro_sma20') -- para poder
     comparar el rendimiento de cada estrategia por separado (ver
     trade_journal.performance_by_strategy()), en vez de mezclarlas todas.
+    entry_confidence: confianza de la señal ('alta' | 'media' | 'baja') en
+    el momento de la compra. entry_spread_pct: spread bid/ask del contrato
+    elegido, en % del ask (ej. 5.0 = 5%). entry_open_interest: open
+    interest del contrato elegido. entry_vix: nivel de ^VIX en el momento
+    de la compra. Los 4 son SOLO registro (2026-09-27, a pedido del
+    usuario tras el estudio de perdidas) -- no cambian ninguna decision de
+    entrada, se guardan para poder correlacionar despues con casos de
+    salto de liquidez o compresion de volatilidad sin tener que
+    reconstruir todo a mano con yfinance cada vez.
     """
     side = side.lower()
     asset_type = asset_type.lower()
@@ -291,10 +375,10 @@ def _record_trade_impl(
             if pos is None:
                 conn.execute(
                     "INSERT INTO positions (key, ticker, asset_type, option_details, quantity, avg_cost, "
-                    "multiplier, opened_at, profit_target_pct, stop_loss_pct, entry_delta, entry_theta) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "multiplier, opened_at, profit_target_pct, stop_loss_pct, entry_delta, entry_theta, "
+                    "entry_strategy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (key, ticker.upper(), asset_type, option_details, quantity, price, multiplier,
-                     _now(), profit_target_pct, stop_loss_pct, entry_delta, entry_theta),
+                     _now(), profit_target_pct, stop_loss_pct, entry_delta, entry_theta, entry_strategy),
                 )
             else:
                 old_qty = pos["quantity"]
@@ -351,17 +435,27 @@ def _record_trade_impl(
         trade_entry_volume_ratio = entry_volume_ratio if is_buy else None
         trade_entry_consecutive_squeeze_bars = entry_consecutive_squeeze_bars if is_buy else None
         trade_entry_strategy = entry_strategy if is_buy else None
+        trade_entry_implied_volatility = entry_implied_volatility if is_buy else None
+        trade_entry_clv = entry_clv if is_buy else None
+        trade_entry_day_pos = entry_day_pos if is_buy else None
+        trade_entry_confidence = entry_confidence if is_buy else None
+        trade_entry_spread_pct = entry_spread_pct if is_buy else None
+        trade_entry_open_interest = entry_open_interest if is_buy else None
+        trade_entry_vix = entry_vix if is_buy else None
         conn.execute(
             "INSERT INTO trades (timestamp, ticker, asset_type, side, quantity, price, multiplier, "
             "cash_effect, cash_after, realized_pnl_delta, reason, option_details, entry_delta, entry_theta, "
             "entry_signal, entry_volatility_strength, entry_band_width_pct, "
-            "entry_band_width_percentile, entry_volume_ratio, entry_consecutive_squeeze_bars, entry_strategy) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "entry_band_width_percentile, entry_volume_ratio, entry_consecutive_squeeze_bars, entry_strategy, "
+            "entry_implied_volatility, entry_clv, entry_day_pos, entry_confidence, entry_spread_pct, "
+            "entry_open_interest, entry_vix) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (now, ticker.upper(), asset_type, side, quantity, price, multiplier,
              cash_effect, new_cash_balance, realized_delta, reason.strip(), option_details, trade_entry_delta,
              trade_entry_theta, trade_entry_signal, trade_entry_volatility_strength, trade_entry_band_width_pct,
              trade_entry_band_width_percentile, trade_entry_volume_ratio, trade_entry_consecutive_squeeze_bars,
-             trade_entry_strategy),
+             trade_entry_strategy, trade_entry_implied_volatility, trade_entry_clv, trade_entry_day_pos,
+             trade_entry_confidence, trade_entry_spread_pct, trade_entry_open_interest, trade_entry_vix),
         )
         conn.execute(
             "UPDATE account SET cash_balance = ?, realized_pnl = realized_pnl + ?, updated_at = ? WHERE id = 1",
@@ -526,6 +620,7 @@ def get_status(current_prices: dict[str, float] | None = None, db_path: Path = D
                 "stop_loss_pct": p["stop_loss_pct"],
                 "entry_delta": p["entry_delta"],
                 "entry_theta": p["entry_theta"],
+                "entry_strategy": p["entry_strategy"],
             }
             if p["option_details"]:
                 entry["option_details"] = json.loads(p["option_details"])
@@ -533,10 +628,14 @@ def get_status(current_prices: dict[str, float] | None = None, db_path: Path = D
 
         total_account_value = account["cash_balance"] + total_market_value
         total_pnl = total_account_value - account["initial_balance"]
+        unsettled = _unsettled_proceeds(conn)
+        cash_balance_available = max(0.0, account["cash_balance"] - unsettled)
 
         return {
             "initial_balance": account["initial_balance"],
             "cash_balance": account["cash_balance"],
+            "cash_balance_available": cash_balance_available,
+            "unsettled_cash": unsettled,
             "positions": pos_list,
             "total_market_value": total_market_value,
             "realized_pnl": account["realized_pnl"],
@@ -614,11 +713,50 @@ def get_history(limit: int = 50, db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
         conn.close()
 
 
-DEFAULT_WATCHLIST = "GOOGL,META,NVDA,COIN,V,QQQ,HOOD,SPY,TSLA,GLD"
+# 2026-09-27, a pedido del usuario ("la idea es poner los tickers que mas
+# fluctuan diarios con mayor volatilidad... asi evitamos mas analisis y
+# mejores resultados"): rankeado con datos reales (rango alto-bajo %
+# promedio de 20 dias habiles via yfinance) -- coincide fuerte con el
+# estudio de perdidas del mismo dia: los 15 mas volatiles son casi
+# exactamente los mejores tickers historicos (RIOT +350pts, MSTR +182pts,
+# HOOD +221pts, SOXL +130pts); los de la lista vieja (COST, MSFT, V, y
+# ETFs anchos como SPY/QQQ) eran justo los perdedores netos o de baja
+# volatilidad real, poco propensos a una ruptura de bandas genuina.
+#
+# 2026-09-28, ACTUALIZADO tras el backtest profundo de 207 tickers
+# (radar de señales, 60 dias de velas de 15m con la logica real de las 5
+# estrategias -- ver memoria): se sacaron los que dieron negativo o casi
+# plano en ese backtest (SOXL -0.10%, AMC +0.09%, LCID -1.94% -- el peor
+# de los 207 --, SMCI +0.03%, SNAP -0.11%, QCOM -0.08%, SHOP -1.04%) y se
+# agregaron los mejores candidatos nuevos que el backtest encontro fuera
+# de la lista (MRNA +1.17%, QBTS +0.90%, RGTI +0.85%, GDX +0.62%,
+# GDXJ +0.59%, NET +0.56%, ADBE +0.54%, BE +0.54%). RIOT se mantuvo pese a
+# salir debil en este backtest (-0.18%) porque su historial REAL de
+# operaciones (con filtros y P&L real de opciones) es el mejor de todos
+# los tickers (+350pts) -- el dato real pesa mas que el proxy direccional
+# sin filtros. Solo afecta cuentas NUEVAS -- las 7 activas se actualizaron
+# aparte, directo en su propia columna settings.watchlist.
+DEFAULT_WATCHLIST = "SOXS,MARA,RIOT,MSTR,COIN,HOOD,INTC,SOFI,MRNA,QBTS,RGTI,GDX,GDXJ,NET,ADBE,BE"
+# 2026-09-28, mismo backtest de 207 tickers, aplicado a la lista de 35
+# (a pedido del usuario: "en la lista de 35 cambiaste las que no tenian
+# buen resultado" -- se habia limpiado DEFAULT_WATCHLIST pero se habia
+# quedado esta sin tocar). Se sacaron 15 con resultado negativo o casi
+# plano (SOXL -0.10%, SMCI +0.03%, NIO -0.43%, AMC +0.09%, SNAP -0.11%,
+# AAPL -0.04%, LCID -1.94%, MSFT -0.17%, JPM -0.10%, XLF -0.07%,
+# SHOP -1.04%, DIS -0.42%, COST -0.04%, QCOM -0.08%, MU -0.09%). Sin
+# repetir NINGUN ticker de DEFAULT_WATCHLIST (a pedido del usuario, "no
+# repitas los que ya estan por defecto" -- SOXS/MARA/INTC/SOFI/RIOT/MSTR
+# se sacaron de aca por estar duplicados con la lista principal) -- se
+# agregaron 21 candidatos nuevos sin overlap, todos con buen resultado en
+# el mismo backtest (NVDA +0.42%, UPST +0.50%, TEAM +0.48%, ARKK +0.47%,
+# ORCL +0.47%, NOW +0.46%, TNA +0.43%, NCLH +0.41%, AAL +0.38%,
+# UVXY +0.37%, CRWD +0.33%, OXY +0.33%, ENPH +0.23%, FCEL +0.22%,
+# VXX +0.22%, MDB +0.12%, XLY +0.11%, GS +0.10%, TZA +0.10%, FCX +0.08%,
+# SPXU +0.07%).
 DEFAULT_FAST_WATCHLIST = (
-    "SOXL,SOXS,MARA,INTC,SMCI,NIO,AMC,PLTR,SOFI,F,SNAP,TQQQ,RIOT,MSTR,SQQQ,"
-    "AAPL,AVGO,NFLX,LCID,AMD,MSFT,AMZN,JPM,XLF,XLE,XLK,UBER,SHOP,DIS,WMT,"
-    "COST,CRM,QCOM,MU,IWM"
+    "PLTR,F,TQQQ,SQQQ,AVGO,NFLX,AMD,AMZN,XLE,XLK,UBER,WMT,CRM,IWM,NVDA,"
+    "UPST,TEAM,ARKK,ORCL,NOW,TNA,NCLH,AAL,UVXY,CRWD,OXY,ENPH,FCEL,VXX,"
+    "MDB,XLY,GS,TZA,FCX,SPXU"
 )
 
 
@@ -648,6 +786,33 @@ def _ensure_settings_table(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE settings ADD COLUMN max_daily_loss_pct REAL NOT NULL DEFAULT 8.0")
     if "risk_pct_per_trade" not in cols:
         conn.execute("ALTER TABLE settings ADD COLUMN risk_pct_per_trade REAL NOT NULL DEFAULT 2.0")
+    if "breaker_override_date" not in cols:
+        # 2026-09-18: fecha UTC (YYYY-MM-DD) del dia en que el usuario volvio
+        # a encender el bot A MANO despues de un circuit breaker. Ver
+        # multi_user_entry._check_circuit_breaker.
+        conn.execute("ALTER TABLE settings ADD COLUMN breaker_override_date TEXT")
+    if "watchlist_enabled" not in cols:
+        # 2026-10-05, a pedido explicito ("que cada usuario elija con
+        # cual watchlist trabajar"): cada cuenta tiene DOS listas
+        # (watchlist propia + fast_watchlist compartida de ETFs) que
+        # antes el motor siempre unia sin que nadie pudiera apagar una
+        # sin vaciarla. Ahora cada lista tiene su propio interruptor --
+        # ver multi_user_entry.py donde se arma my_watchlist.
+        conn.execute("ALTER TABLE settings ADD COLUMN watchlist_enabled INTEGER NOT NULL DEFAULT 1")
+    if "fast_watchlist_enabled" not in cols:
+        conn.execute("ALTER TABLE settings ADD COLUMN fast_watchlist_enabled INTEGER NOT NULL DEFAULT 1")
+    if "default_capital_list_enabled" not in cols:
+        # 2026-10-05, a pedido explicito ("que por defecto salga una lista
+        # basada en su capital, con la opcion de usarla o no... si la usa,
+        # la watchlist y la lista de ETF de preferencia se desactivan
+        # automaticamente hasta que la vuelva a activar"): modo alternativo
+        # al par watchlist/fast_watchlist de siempre -- cuando esta
+        # ENCENDIDO, el motor arma la lista de escaneo de esta cuenta
+        # filtrando TODO el universo por defecto (DEFAULT_WATCHLIST +
+        # DEFAULT_FAST_WATCHLIST) por su poder de compra real, en vez de
+        # usar sus listas personalizadas (que update_settings() apaga y
+        # prende en cascada junto con este interruptor, ver mas abajo).
+        conn.execute("ALTER TABLE settings ADD COLUMN default_capital_list_enabled INTEGER NOT NULL DEFAULT 0")
     if "sizing_mode" not in cols:
         # 2026-09-14, a pedido del usuario: modo de dimensionamiento
         # elegible por cuenta -- 'auto' (% de riesgo sobre el valor de
@@ -682,6 +847,9 @@ def _settings_row_to_dict(row: sqlite3.Row) -> dict:
     raw_fast = d.get("fast_watchlist") or DEFAULT_FAST_WATCHLIST
     d["fast_watchlist"] = [t.strip().upper() for t in raw_fast.split(",") if t.strip()]
     d["bot_enabled"] = bool(d.get("bot_enabled", 1))
+    d["watchlist_enabled"] = bool(d.get("watchlist_enabled", 1))
+    d["fast_watchlist_enabled"] = bool(d.get("fast_watchlist_enabled", 1))
+    d["default_capital_list_enabled"] = bool(d.get("default_capital_list_enabled", 0))
     return d
 
 
@@ -711,10 +879,14 @@ def update_settings(
     max_trades_per_day: int | None = None,
     watchlist: list[str] | str | None = None,
     fast_watchlist: list[str] | str | None = None,
+    watchlist_enabled: bool | None = None,
+    fast_watchlist_enabled: bool | None = None,
+    default_capital_list_enabled: bool | None = None,
     bot_enabled: bool | None = None,
     max_daily_loss_pct: float | None = None,
     risk_pct_per_trade: float | None = None,
     sizing_mode: str | None = None,
+    breaker_override_today: bool | None = None,
     db_path: Path = DEFAULT_DB_PATH,
 ) -> dict:
     conn = _connect(db_path)
@@ -752,13 +924,47 @@ def update_settings(
         new_fast_watchlist = current["fast_watchlist"] if fast_watchlist is None else _normalize_list(fast_watchlist, allow_empty=True)
 
         new_bot_enabled = current["bot_enabled"] if bot_enabled is None else (1 if bot_enabled else 0)
+        new_watchlist_enabled = (
+            current.get("watchlist_enabled", 1) if watchlist_enabled is None else (1 if watchlist_enabled else 0)
+        )
+        new_fast_watchlist_enabled = (
+            current.get("fast_watchlist_enabled", 1) if fast_watchlist_enabled is None else (1 if fast_watchlist_enabled else 0)
+        )
+        new_default_capital_list_enabled = (
+            current.get("default_capital_list_enabled", 0) if default_capital_list_enabled is None
+            else (1 if default_capital_list_enabled else 0)
+        )
+        # 2026-10-05, a pedido explicito ("si la watchlist esta activa las
+        # otras se desactivan, a no ser que el usuario las active" --
+        # confirmado simetrico para las 3: watchlist propia, fast_watchlist/
+        # ETF compartida, y la lista automatica por capital): activar
+        # CUALQUIERA de las 3 en esta misma llamada apaga las otras 2 por
+        # defecto -- el usuario puede volver a prenderlas despues a mano
+        # en una llamada posterior, esto no es un bloqueo permanente, solo
+        # el comportamiento automatico al activar una.
+        if watchlist_enabled is True:
+            new_fast_watchlist_enabled = 0
+            new_default_capital_list_enabled = 0
+        if fast_watchlist_enabled is True:
+            new_watchlist_enabled = 0
+            new_default_capital_list_enabled = 0
+        if default_capital_list_enabled is True:
+            new_watchlist_enabled = 0
+            new_fast_watchlist_enabled = 0
+
+        if breaker_override_today is None:
+            new_override_date = current.get("breaker_override_date")
+        else:
+            new_override_date = _now()[:10] if breaker_override_today else None
 
         conn.execute(
             "UPDATE settings SET contracts_per_trade = ?, max_trades_per_day = ?, watchlist = ?, "
-            "fast_watchlist = ?, bot_enabled = ?, max_daily_loss_pct = ?, risk_pct_per_trade = ?, "
-            "sizing_mode = ?, updated_at = ? WHERE id = 1",
-            (new_contracts, new_max_trades, new_watchlist, new_fast_watchlist, new_bot_enabled,
-             new_max_daily_loss_pct, new_risk_pct_per_trade, new_sizing_mode, _now()),
+            "fast_watchlist = ?, watchlist_enabled = ?, fast_watchlist_enabled = ?, default_capital_list_enabled = ?, "
+            "bot_enabled = ?, max_daily_loss_pct = ?, risk_pct_per_trade = ?, sizing_mode = ?, "
+            "breaker_override_date = ?, updated_at = ? WHERE id = 1",
+            (new_contracts, new_max_trades, new_watchlist, new_fast_watchlist,
+             new_watchlist_enabled, new_fast_watchlist_enabled, new_default_capital_list_enabled, new_bot_enabled,
+             new_max_daily_loss_pct, new_risk_pct_per_trade, new_sizing_mode, new_override_date, _now()),
         )
         conn.commit()
         return _settings_row_to_dict(conn.execute("SELECT * FROM settings WHERE id = 1").fetchone())

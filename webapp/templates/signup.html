@@ -3,21 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Crear cuenta — Bot Familiar</title>
+  <title>Crear cuenta — Metabot</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="icon" href="{{ url_for('static', filename='img/logo.ico') }}">
+  <link rel="icon" href="{{ url_for('static', filename='img/metabot-logo.ico') }}">
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
   <meta name="theme-color" content="#0b0d12">
-  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/icon-192.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/metabot-icon-192.png') }}">
   <link rel="stylesheet" href="{{ asset_url('css/style.css') }}">
 </head>
-<body class="login-body">
+<body class="login-body brand-metabot">
+  <div class="corner-logo-wrap" aria-hidden="true">
+    <img class="corner-logo" src="{{ url_for('static', filename='img/metabot-icon-192.png') }}" alt="">
+  </div>
   <div class="login-card">
-    <div class="login-mark">FAM</div>
+    <img class="login-mark" src="{{ url_for('static', filename='img/metabot-logo-full.png') }}" alt="Metabot Trading">
     <h1>Crear cuenta</h1>
-    <p class="muted small">Bot Familiar — cada quien con su propia cuenta y capital</p>
+    <p class="muted small">Metabot — cada quien con su propia cuenta y capital</p>
     {% if error %}
       <div class="alert">{{ error }}</div>
     {% endif %}
@@ -44,7 +47,7 @@
     </form>
     <p class="muted small" style="margin-top:1rem;text-align:center;">
       Tu cuenta queda pendiente hasta que el administrador la apruebe — te va a llegar un código para activarla.
-      Arrancás con $10,000 de capital SIMULADO (dinero real llega mas adelante).
+      Arrancás con $100,000 de capital SIMULADO — el plan Pro te deja conectar tu cuenta real de Tradier más adelante.
     </p>
     <p class="muted small" style="text-align:center;"><a href="{{ url_for('login') }}">Ya tengo cuenta</a></p>
     {% endif %}

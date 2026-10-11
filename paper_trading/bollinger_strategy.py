@@ -53,7 +53,7 @@ ya se detecta antes de que abra la sesion regular, en vez de perderse.
 import pickle
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeoutError
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from datetime import time as dtime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -107,6 +107,40 @@ _HIST_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "hist_cache"
 _HIST_CACHE_TTL = 45  # segundos -- bastante para cubrir el solape entre procesos, corto para no operar con datos viejos
 
 
+# 2026-09-20, a pedido del usuario ("que mi yfinance no se recargue"): el
+# cache de 45 s vencia siempre entre ciclos de 2 min, asi que CADA ciclo
+# volvia a descargar el historial de todos los tickers aunque una vela de
+# 15m solo cambia cada 15 min. Con este cache alineado a las velas, un
+# archivo descargado AL MENOS 60 s despues del ultimo cierre de vela se
+# reutiliza hasta el siguiente cierre (~2 descargas por ticker cada 15 min
+# en vez de ~7). Es equivalente para las señales: solo se evaluan velas
+# CERRADAS y ninguna se cierra entre la descarga y el siguiente cierre. Los
+# 60 s de margen cubren el retraso con que Yahoo finaliza la ultima vela.
+# INTERRUPTORES: ALIGNED_CACHE_ENABLED = False, o crear el archivo
+# data/aligned_cache_off (lo crea verify_aligned_cache.py si detecta velas
+# incompletas). Solo aplica a 15m y 1h; el resto sigue con el TTL corto.
+ALIGNED_CACHE_ENABLED = True
+_ALIGNED_TRUST_DELAY = 60  # segundos despues del cierre de vela
+_ALIGNED_SPEC = {"15m": (900, 0), "1h": (3600, 1800)}  # (segundos por vela, desfase del inicio; las velas de 1h de Yahoo empiezan en :30)
+_ALIGNED_OFF_FLAG = _HIST_CACHE_DIR.parent / "aligned_cache_off"
+
+
+def _cache_is_fresh(cache_path: Path, interval: str, now: float | None = None) -> bool:
+    try:
+        mtime = cache_path.stat().st_mtime
+    except OSError:
+        return False
+    now = time.time() if now is None else now
+    if now - mtime < _HIST_CACHE_TTL:
+        return True
+    spec = _ALIGNED_SPEC.get(interval)
+    if not ALIGNED_CACHE_ENABLED or spec is None or _ALIGNED_OFF_FLAG.exists():
+        return False
+    step, offset = spec
+    last_boundary = (now - offset) // step * step + offset
+    return mtime >= last_boundary + _ALIGNED_TRUST_DELAY
+
+
 def _hist_cache_path(symbol: str, period: str, interval: str) -> Path:
     safe = f"{symbol}_{period}_{interval}".replace("/", "_").replace(" ", "_")
     return _HIST_CACHE_DIR / f"{safe}.pkl"
@@ -125,10 +159,31 @@ def _stale_cache_or_raise(cache_path: Path, exc: Exception):
     raise exc
 
 
+# 2026-10-07, a pedido del usuario ("mi bot simulado desde ahora va ser
+# solo para tradier"): override opcional de la fuente de datos, para que
+# un proceso dedicado (ver tradier_cycle.py) pueda alimentar TODA la
+# logica de señales existente con velas de Tradier en vez de yfinance,
+# sin tocar ninguna estrategia. None (el valor por defecto en todo
+# proceso normal: multi_user_entry.py, exit_watch.py, el panel) preserva
+# el comportamiento de siempre con yfinance -- cero cambio de
+# comportamiento para ninguna cuenta que no la active explicitamente.
+_ACTIVE_FETCHER = None
+
+
+def set_active_fetcher(fetcher) -> None:
+    """fetcher: callable(symbol, period, interval) -> DataFrame con
+    columnas Open/High/Low/Close/Volume, igual que yf.Ticker().history().
+    Pasar None restaura el comportamiento normal con yfinance."""
+    global _ACTIVE_FETCHER
+    _ACTIVE_FETCHER = fetcher
+
+
 def _fetch_history(symbol: str, period: str, interval: str):
+    if _ACTIVE_FETCHER is not None:
+        return _ACTIVE_FETCHER(symbol, period, interval)
     cache_path = _hist_cache_path(symbol, period, interval)
     try:
-        if cache_path.exists() and (time.time() - cache_path.stat().st_mtime) < _HIST_CACHE_TTL:
+        if _cache_is_fresh(cache_path, interval):
             with open(cache_path, "rb") as f:
                 return pickle.load(f)
     except Exception:
@@ -232,26 +287,37 @@ SQUEEZE_MIN_BARS = 2
 VOLUME_LOOKBACK = 20
 
 # Umbral para considerar la ruptura "extrema" (volatilidad de apertura
-# extrema) vs una ruptura con volumen "regular".
+# extrema) vs una ruptura con volumen "regular" -- se sigue usando para
+# clasificar volatility_strength (dimension de aprendizaje/filtros de
+# entrada), aunque ya no crea un salto brusco en el objetivo de ganancia
+# (ver mas abajo).
 STRONG_VOLUME_MULT = 2.0
-PROFIT_TARGET_REGULAR_PCT = 0.10   # +10% fijo sobre la prima con volatilidad regular
 
-# Con volatilidad EXTREMA (volume_ratio >= STRONG_VOLUME_MULT), el objetivo
-# no es fijo: escala entre 15% y 20% segun que tan extremo sea el volumen.
-# A partir de STRONG_VOLUME_MULT el objetivo empieza en el minimo (15%) y
-# sube linealmente hasta el maximo (20%) cuando el volumen llega a
-# EXTREME_VOLUME_MULT_FOR_MAX_TARGET o mas.
-PROFIT_TARGET_EXTREME_MIN_PCT = 0.15
-PROFIT_TARGET_EXTREME_MAX_PCT = 0.20
+# 2026-09-17, a pedido del usuario ("pon que escale entre 10% y 20 y ahi
+# tomar la ganancia donde se detenga el impulso"): antes el objetivo era
+# BINARIO -- 10% fijo para volumen "regular" (menos de 2x) y recien a
+# partir de 2x escalaba entre 15-20%, con un salto brusco justo en el
+# umbral. Ahora escala de forma CONTINUA desde 10% (volumen apenas por
+# encima del promedio, el minimo para siquiera calificar como "alto
+# volumen" y entrar) hasta 20% (a partir de EXTREME_VOLUME_MULT_FOR_MAX_TARGET
+# o mas), sin salto al cruzar el umbral de "extrema". La proteccion de
+# "tomar la ganancia donde se detenga el impulso" ya existe por separado
+# (ver asegurar_porcion_del_pico / TRAILING_GIVEBACK_* mas abajo en
+# evaluate_open_position_exit): se dispara apenas el pico visto cae a la
+# mitad, sin esperar a este objetivo fijo -- sigue actuando igual con el
+# nuevo objetivo continuo, ya que es una regla de salida independiente.
+PROFIT_TARGET_MIN_PCT = 0.10
+PROFIT_TARGET_MAX_PCT = 0.20
+PROFIT_TARGET_MIN_VOLUME_MULT = 1.0  # volumen apenas mayor al promedio -- el piso real para calificar "alto volumen"
 EXTREME_VOLUME_MULT_FOR_MAX_TARGET = 4.0
 
 
-def _extreme_profit_target(volume_ratio: float) -> float:
-    span_mult = EXTREME_VOLUME_MULT_FOR_MAX_TARGET - STRONG_VOLUME_MULT
-    progress = (volume_ratio - STRONG_VOLUME_MULT) / span_mult if span_mult else 1.0
+def _scaled_profit_target(volume_ratio: float) -> float:
+    span_mult = EXTREME_VOLUME_MULT_FOR_MAX_TARGET - PROFIT_TARGET_MIN_VOLUME_MULT
+    progress = (volume_ratio - PROFIT_TARGET_MIN_VOLUME_MULT) / span_mult if span_mult else 1.0
     progress = max(0.0, min(1.0, progress))
-    span_pct = PROFIT_TARGET_EXTREME_MAX_PCT - PROFIT_TARGET_EXTREME_MIN_PCT
-    return PROFIT_TARGET_EXTREME_MIN_PCT + progress * span_pct
+    span_pct = PROFIT_TARGET_MAX_PCT - PROFIT_TARGET_MIN_PCT
+    return PROFIT_TARGET_MIN_PCT + progress * span_pct
 
 # Si el mercado se mueve en contra de la posicion, se corta la perdida sin
 # esperar mas: -20% sobre la prima pagada, sin importar la fuerza de entrada.
@@ -432,15 +498,40 @@ def analyze(symbol: str, interval: str = DEFAULT_INTERVAL, period: str = DEFAULT
     # MSFT -21.53%, MARA -23.73%, TSLA -25.00%), las de 0.3% o mas
     # tuvieron 87.5% de acierto (unica perdida: HOOD -22.52%). Tocar
     # apenas la banda ya no alcanza -- tiene que romperla con margen real.
+    #
+    # Esta definicion de breakout_up/down (cierre + margen) se sigue
+    # usando SOLO para las señales de SALIDA de abajo (sin cambios).
     breakout_up = last_close > last_upper * (1 + EARLY_BREAKOUT_MARGIN_PCT / 100)
     breakout_down = last_close < last_lower * (1 - EARLY_BREAKOUT_MARGIN_PCT / 100)
     cross_below_mid = last_close < last_sma
     cross_above_mid = last_close > last_sma
 
+    # 2026-10-02, a pedido EXPLICITO y directo del usuario ("implementa la
+    # entrada por toque de banda ya" / "hazlo como yo te dije... cuando el
+    # grafico de cualquier ticker se vea asi vas a entrar"): la entrada ya
+    # NO exige que el CIERRE rompa la banda con margen -- exige que la
+    # MECHA toque la banda (high/low) durante el squeeze, con volumen alto
+    # (ya exigido) Y impulso real (las ultimas 3 velas, cierre tras cierre,
+    # en la misma direccion). Aviso dado antes de implementar: backtest
+    # real de esta regla exacta (44 tickers, 60 dias, n=585) dio 43%
+    # acierto / -0.043% promedio -- no mostro edge en agregado, a
+    # diferencia del filtro de margen (87.5% en la muestra validada el
+    # 2026-09-16, aunque esa muestra tambien fallo al re-testearse hoy con
+    # datos recientes). El usuario vio su propio ejemplo real (RIOT,
+    # +8.82%) y decidio proceder de todas formas con esta regla. Para
+    # REVERTIR: usar breakout_up/breakout_down (arriba) en vez de
+    # touch_up/touch_down en la señal de compra.
+    last_high = float(hist["High"].iloc[-1])
+    last_low = float(hist["Low"].iloc[-1])
+    touch_up = last_high >= last_upper
+    touch_down = last_low <= last_lower
+    momentum_up = len(closes) >= 3 and closes.iloc[-1] > closes.iloc[-2] > closes.iloc[-3]
+    momentum_down = len(closes) >= 3 and closes.iloc[-1] < closes.iloc[-2] < closes.iloc[-3]
+
     signal = "none"
-    if was_squeezed and breakout_up and high_volume:
+    if was_squeezed and touch_up and momentum_up and high_volume:
         signal = "buy_call"
-    elif was_squeezed and breakout_down and high_volume:
+    elif was_squeezed and touch_down and momentum_down and high_volume:
         signal = "buy_put"
 
     exit_long_signal = cross_below_mid or (breakout_down and high_volume)
@@ -453,7 +544,7 @@ def analyze(symbol: str, interval: str = DEFAULT_INTERVAL, period: str = DEFAULT
         pass
 
     volatility_strength = "extrema" if strong_volume else "regular"
-    profit_target_pct = _extreme_profit_target(volume_ratio) if strong_volume else PROFIT_TARGET_REGULAR_PCT
+    profit_target_pct = _scaled_profit_target(volume_ratio)
 
     band_tightness_desc = (
         f"Ancho de banda actual {last_width:.2f}% del precio (percentil {width_percentile_rank:.0f} "
@@ -585,6 +676,18 @@ def analyze(symbol: str, interval: str = DEFAULT_INTERVAL, period: str = DEFAULT
 EARLY_BREAKOUT_MARGIN_PCT = 0.30   # el precio debe superar la banda por >= 0.30% adicional, no solo tocarla
 EARLY_MIN_BAR_ELAPSED_PCT = 0.20   # ignora el primer 20% de la vela -- el volumen proyectado no es confiable todavia
 EARLY_VOLUME_MULT = 1.3            # volumen proyectado debe superar 1.3x el promedio, no solo 1.0x
+# 2026-10-05, a pedido explicito del usuario (caso real NVDA: entro con el
+# ancho de banda todavia en su punto MAS apretado de las ultimas 4 velas
+# cerradas -- 2.68% -> 2.53% -> 2.28% -> 2.08%, siempre bajando -- y se
+# revirtio 1 segundo despues; "no es un punto exacto es el momento donde
+# las bandas estan abriendo CON AMPLITUD... eso no se esta cumpliendo"):
+# antes solo se exigia que el precio PARCIAL tocara la banda calculada con
+# velas cerradas (que todavia podia estar en su punto mas apretado, como en
+# NVDA) -- ahora ademas se exige que el ancho de banda de la ULTIMA VELA
+# YA CERRADA haya subido de verdad respecto al minimo del squeeze, osea
+# que la apertura ya este confirmada con datos cerrados, no solo con la
+# vela parcial (que es ruido por definicion, ver EARLY_MIN_BAR_ELAPSED_PCT).
+EARLY_BAND_OPENING_MIN_RISE_PCT = 5.0  # el ancho de la ultima vela cerrada debe superar el minimo del squeeze por >= 5%
 
 
 def analyze_forming_bar(symbol: str, interval: str = DEFAULT_INTERVAL, period: str = DEFAULT_PERIOD) -> dict | None:
@@ -637,9 +740,36 @@ def analyze_forming_bar(symbol: str, interval: str = DEFAULT_INTERVAL, period: s
     if not was_squeezed:
         return None
 
+    # 2026-10-05, a pedido explicito ("amplitud de bandas y en el momento
+    # que la vela toque la banda se hace la entrada" -- ver nota junto a
+    # EARLY_BAND_OPENING_MIN_RISE_PCT): no alcanza con que el squeeze haya
+    # existido, la banda tiene que estar YA ABRIENDOSE de verdad (confirmado
+    # con la ULTIMA VELA CERRADA, no con la parcial) antes de dejar pasar
+    # el toque. Si la ultima vela cerrada sigue en el punto mas apretado
+    # del squeeze (o mas apretada todavia), no hay apertura confirmada.
+    squeeze_run_widths = [float(w) for w in width_pct[::-1].iloc[:consecutive_squeeze] if _notna(w)]
+    squeeze_min_width = min(squeeze_run_widths) if squeeze_run_widths else None
+    last_closed_width = float(width_pct.iloc[-1]) if _notna(width_pct.iloc[-1]) else None
+    band_already_opening = (
+        squeeze_min_width is not None and last_closed_width is not None
+        and last_closed_width > squeeze_min_width * (1 + EARLY_BAND_OPENING_MIN_RISE_PCT / 100)
+    )
+    if not band_already_opening:
+        return None
+
+    # 2026-10-02, a pedido explicito del usuario ("activala con la logica
+    # que hay en la foto"): misma logica de toque+impulso que la entrada
+    # normal (ver nota en analyze()), aplicada a la vela EN FORMACION.
     forming_price = float(forming["Close"])
-    breakout_up = forming_price > last_upper * (1 + EARLY_BREAKOUT_MARGIN_PCT / 100)
-    breakout_down = forming_price < last_lower * (1 - EARLY_BREAKOUT_MARGIN_PCT / 100)
+    forming_high = float(forming["High"])
+    forming_low = float(forming["Low"])
+    closed_closes = closed["Close"]
+    touch_up = forming_high >= last_upper
+    touch_down = forming_low <= last_lower
+    momentum_up = len(closed_closes) >= 2 and forming_price > closed_closes.iloc[-1] > closed_closes.iloc[-2]
+    momentum_down = len(closed_closes) >= 2 and forming_price < closed_closes.iloc[-1] < closed_closes.iloc[-2]
+    breakout_up = touch_up and momentum_up
+    breakout_down = touch_down and momentum_down
     if not (breakout_up or breakout_down):
         return None
 
@@ -657,7 +787,7 @@ def analyze_forming_bar(symbol: str, interval: str = DEFAULT_INTERVAL, period: s
     signal = "buy_call" if breakout_up else "buy_put"
     strong_volume = enough_volume_data and volume_ratio >= STRONG_VOLUME_MULT
     volatility_strength = "extrema" if strong_volume else "regular"
-    profit_target_pct = _extreme_profit_target(volume_ratio) if strong_volume else PROFIT_TARGET_REGULAR_PCT
+    profit_target_pct = _scaled_profit_target(volume_ratio)
     closes_at = last_ts + delta
 
     band_tightness_desc = (
@@ -767,6 +897,100 @@ def get_trend(symbol: str, interval: str, period: str, raw_hist=None) -> str | N
     return "lateral"
 
 
+RECENT_MOMENTUM_MINUTES = 10
+
+# 2026-09-23, a pedido del usuario ("investiga a profundidad y arregla el
+# problema" -- PLTR entro comprando un call mientras el precio ya venia
+# cayendo en los minutos previos). Estudio real con 75 entradas de los
+# ultimos 8 dias (velas de 1 minuto reales, resultado real de cada
+# operacion via shadow_stop_watch.json): las entradas donde el precio de
+# los RECENT_MOMENTUM_MINUTES minutos previos se movio EN CONTRA de la
+# direccion de la señal (ej. cayendo antes de un buy_call) promediaron
+# -2.39% (n=15, incluye tanto en contra "leve" -0.3%/0% como "fuerte"
+# <=-0.3%, ambos negativos por separado); las que tenian el momentum a
+# favor o neutro promediaron +6.34% (n=60). Ver su uso en
+# multi_user_entry.py (filtro de entrada, no de salida).
+def recent_momentum_pct(symbol: str, minutes: int = RECENT_MOMENTUM_MINUTES) -> float | None:
+    """% de cambio del precio en los ultimos `minutes` minutos (velas de 1
+    minuto reales, no la vela de 15m de la señal). None si no hay
+    suficientes datos (feriado, simbolo nuevo, red caida, etc.) -- el
+    llamador debe tratar None como "sin informacion" (no bloquea), nunca
+    como "momentum negativo"."""
+    try:
+        # Pasa por _fetch_history() (no un yf.Ticker() directo) para
+        # heredar el override de proveedor de datos (ver _ACTIVE_FETCHER
+        # arriba) y el cache/backoff que ya tiene esa funcion -- antes
+        # este era el unico punto de la estrategia que saltaba ambos.
+        hist = _fetch_history(symbol, "1d", "1m")
+        hist = hist.dropna(subset=["Close"])
+        if len(hist) < 2:
+            return None
+        window = hist.tail(minutes + 1)
+        if len(window) < 2:
+            return None
+        before = float(window["Close"].iloc[0])
+        now = float(window["Close"].iloc[-1])
+        if before <= 0:
+            return None
+        return (now / before - 1) * 100
+    except Exception:
+        return None
+
+
+# 2026-09-27, a pedido del usuario tras el estudio profundo de perdidas
+# ("busca los datos que aun no tenemos... para perfeccionar"): nivel de
+# ^VIX en el momento de cada entrada -- solo registro (ver su uso en
+# multi_user_entry.py, guardado via engine.record_trade(entry_vix=...)),
+# no cambia ninguna decision. Antes habia que reconstruirlo a mano con
+# yfinance cada vez que se investigaba un caso puntual (ej. UBER 9/25).
+def current_vix() -> float | None:
+    """Ultimo valor conocido de ^VIX. None si no hay datos (feriado, red
+    caida, etc.) -- el llamador debe tratar None como "sin informacion"."""
+    try:
+        hist = yf.Ticker("^VIX").history(period="1d", interval="1m", prepost=False)
+        hist = hist.dropna(subset=["Close"])
+        if hist.empty:
+            return None
+        return float(hist["Close"].iloc[-1])
+    except Exception:
+        return None
+
+
+# 2026-09-27, a pedido del usuario tras la conversacion sobre que agregar
+# como trader profesional ("investiga como ganar mas puntos... que le
+# agregarias para mejorar" -> "revisa lo de earnings" -> "si agregalo
+# igual"): practica estandar de gestion de riesgo en opciones -- evitar
+# entrar el dia de earnings de un ticker por el IV crush post-anuncio
+# (la prima se desploma aunque el precio acierte la direccion). NO se
+# pudo validar con datos propios (las 348 entradas reales del 2026-09-15
+# al 25 cayeron en el "valle" entre temporadas de resultados, 0 casos
+# para comparar) -- se agrega por principio, no por backtest, igual que
+# los filtros de liquidez originales. Revisar de nuevo con datos reales
+# en la proxima temporada de earnings grande (~mediados de octubre).
+def has_earnings_today(symbol: str) -> bool:
+    """True si `symbol` reporta earnings hoy o mañana (+-1 dia de margen
+    por huso horario/pre-post market). False si no hay datos o hay error
+    de red -- el llamador debe tratar False como "sin earnings conocido"
+    (no bloquea), nunca como confirmacion de que NO hay earnings."""
+    try:
+        ed = yf.Ticker(symbol).get_earnings_dates(limit=8)
+        if ed is None or ed.empty:
+            return False
+        idx = ed.index
+        try:
+            idx = idx.tz_convert("UTC")
+        except (TypeError, AttributeError):
+            pass
+        today = datetime.now(timezone.utc).date()
+        for ts in idx:
+            d = ts.date() if hasattr(ts, "date") else ts
+            if abs((today - d).days) <= 1:
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def multi_timeframe_trends(symbol: str, raw_hist_by_interval: dict | None = None) -> dict:
     """Tendencia del simbolo en 15m y 1h (day trading: por defecto no se
     consultan temporalidades mayores).
@@ -833,9 +1057,43 @@ def analyze_with_confirmation(symbol: str, interval: str = DEFAULT_INTERVAL, per
     raw_hist_by_interval = {interval: raw_hist} if interval == MTF_TIMEFRAMES[0][0] else {}
     trends = multi_timeframe_trends(symbol, raw_hist_by_interval=raw_hist_by_interval)
     confirmation = confirmation_for_signal(result["signal"], trends)
+
+    # 2026-09-17, a pedido del usuario ("aprovechar RSI para mejorar"): RSI(14)
+    # como CONFIRMACION SUAVE de squeeze_breakout (NO como entrada propia --
+    # esa via, detect_rsi_reversal, ya fue probada y descartada dos veces con
+    # 40.7% y 41.3% de acierto en backtests reales separados). Backtest
+    # aislado (60d/15m sobre la watchlist real, mismas funciones de
+    # produccion): exigir RSI>50 para CALL / RSI<50 para PUT sobre las
+    # señales YA EXISTENTES de squeeze_breakout subio el acierto de 58.0% a
+    # 68.6% y el P&L promedio de 0.33% a 0.87% (n=35 vs n=69 -- una sola
+    # ventana de 60 dias, muestra chica). Por eso se aplica como
+    # DEGRADACION de confianza (alta -> media), no como bloqueo directo:
+    # una señal en confianza media todavia puede operar salvo que ademas
+    # choque con sesgo diario / ticker "cuidado" / noticia reciente -- el
+    # mismo tratamiento que ya reciben otras señales en confianza media
+    # (ver multi_user_entry.py). Revalidar con mas datos reales acumulados
+    # antes de subir esto a bloqueo duro.
+    last_rsi = None
+    rsi_confirms = None
+    if result["strategy"] == "squeeze_breakout" and result["signal"] in ("buy_call", "buy_put"):
+        rsi_hist = raw_hist.dropna(subset=["Close", "Volume"])
+        rsi_hist = _drop_unclosed_bar(rsi_hist, interval)
+        rsi_series = _compute_rsi(rsi_hist["Close"])
+        if len(rsi_series.dropna()):
+            last_rsi = float(rsi_series.iloc[-1])
+            rsi_confirms = (last_rsi > 50) if result["signal"] == "buy_call" else (last_rsi < 50)
+            if not rsi_confirms and confirmation["confidence"] == "alta":
+                confirmation = {**confirmation, "confidence": "media"}
+                result["reason"] += (
+                    f" [RSI(14)={last_rsi:.1f} NO confirma la direccion de la señal -> confianza "
+                    f"degradada de alta a media.]"
+                )
+
     result["mtf_trends"] = trends
     result["confidence"] = confirmation["confidence"]
     result["confidence_detail"] = confirmation
+    result["rsi_value"] = last_rsi
+    result["rsi_confirms"] = rsi_confirms
     return result
 
 
@@ -942,7 +1200,7 @@ def detect_opening_gap_fade(symbol: str, interval: str = DEFAULT_INTERVAL, perio
     volume_ratio = (last_volume / avg_volume) if avg_volume else 0.0
     strong_volume = enough_volume_data and volume_ratio >= STRONG_VOLUME_MULT
     volatility_strength = "extrema" if strong_volume else "regular"
-    profit_target_pct = _extreme_profit_target(volume_ratio) if strong_volume else PROFIT_TARGET_REGULAR_PCT
+    profit_target_pct = _scaled_profit_target(volume_ratio)
 
     force_eod_exit = False
     try:
@@ -1018,6 +1276,186 @@ def detect_opening_gap_fade(symbol: str, interval: str = DEFAULT_INTERVAL, perio
         "is_opening_bar": is_opening_bar,
         "extension_ratio_up": extension_ratio_up,
         "extension_ratio_down": extension_ratio_down,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Estrategia nueva (2026-10-04, a pedido explicito y repetido del usuario
+# tras mostrar graficos reales de TC2000): cuando la vela de apertura
+# "amanece" FUERA de la banda, el precio casi siempre (77-78% real,
+# n=1537 dias) termina tocando la SMA20 ese mismo dia -- pero la ENTRADA
+# que pide el usuario no es "esperar a tocar la SMA20", es entrar YA en
+# el momento en que la banda EMPIEZA a cerrarse (el ancho baja 2 barras
+# seguidas por primera vez desde la apertura), apostando a la reversion
+# (fade) hacia adentro.
+#
+# Backtest real (44 tickers, 60 dias, forward 4 barras/1h):
+#   - Sin filtro de volumen: n=1537, 50% acierto, -0.016% promedio -- sin
+#     edge real, practicamente moneda al aire.
+#   - Con volumen alto exigido (igual criterio que las demas estrategias):
+#     n=213, 52% acierto, +0.037% promedio, estable OOS (no cambia de
+#     signo) pero el margen es muy chico, por debajo del costo real de
+#     spread (~0.65%) -- no alcanzaria para ser rentable sola.
+# El usuario vio estos dos resultados y pidio implementarla igual
+# ("no me importa... tu vas a hacer una entrada"). Implementada con el
+# filtro de volumen (la version menos mala de las dos probadas).
+# ---------------------------------------------------------------------------
+
+GAP_BAND_CLOSE_CONTRACTION_BARS = 2  # barras consecutivas de ancho bajando para contar como "la banda empieza a cerrar"
+
+
+def detect_gap_band_close_fade(symbol: str, interval: str = DEFAULT_INTERVAL, period: str = DEFAULT_PERIOD,
+                                raw_hist=None) -> dict:
+    """Si la vela de apertura (9:30 ET) de HOY quedo fuera de la banda, y
+    AHORA (la ultima barra cerrada) es la primera vez desde la apertura
+    que el ancho de banda lleva GAP_BAND_CLOSE_CONTRACTION_BARS barras
+    seguidas bajando (la banda "empieza a cerrarse"), entra a favor de la
+    reversion hacia adentro (fade): PUT si abrio arriba de la banda, CALL
+    si abrio abajo. Exige volumen alto en esa barra (ver nota de backtest
+    arriba -- sin volumen el resultado real es moneda al aire)."""
+    hist = raw_hist if raw_hist is not None else _fetch_history(symbol, period, interval)
+    hist = hist.dropna(subset=["Open", "Close", "Volume"])
+    hist = _drop_unclosed_bar(hist, interval)
+    if len(hist) < BB_PERIOD + GAP_BAND_CLOSE_CONTRACTION_BARS + 5:
+        raise ValueError(
+            f"No hay suficiente historial de '{symbol}' en intervalo {interval}/{period} "
+            f"para calcular Bandas de Bollinger de {BB_PERIOD} periodos."
+        )
+
+    closes = hist["Close"]
+    volumes = hist["Volume"]
+    sma, upper, lower, width_pct = _bollinger(closes)
+    last_ts = hist.index[-1]
+    i = len(hist) - 1
+
+    today = last_ts.date()
+    today_mask = hist.index.date == today
+    today_positions = [j for j, m in enumerate(today_mask) if m]
+
+    signal = "none"
+    opened_above = opened_below = False
+    contracting_now = False
+    if len(today_positions) >= GAP_BAND_CLOSE_CONTRACTION_BARS + 1:
+        open_pos = today_positions[0]
+        if _notna(upper.iloc[open_pos]) and _notna(lower.iloc[open_pos]):
+            open_close = float(closes.iloc[open_pos])
+            opened_above = open_close > float(upper.iloc[open_pos])
+            opened_below = open_close < float(lower.iloc[open_pos])
+
+        if (opened_above or opened_below) and i >= GAP_BAND_CLOSE_CONTRACTION_BARS + 1:
+            w = width_pct.iloc[i - GAP_BAND_CLOSE_CONTRACTION_BARS - 1:i + 1]
+            if not w.isna().any() and len(w) == GAP_BAND_CLOSE_CONTRACTION_BARS + 2:
+                vals = w.tolist()
+                # bajando las ultimas GAP_BAND_CLOSE_CONTRACTION_BARS barras...
+                currently_contracting = all(vals[k] < vals[k - 1] for k in range(-GAP_BAND_CLOSE_CONTRACTION_BARS, 0))
+                # ...pero NO ya veniamos contrayendo antes (para disparar una
+                # sola vez, en la barra donde EMPIEZA, no en todas las que siguen).
+                was_already_contracting = vals[-2] < vals[-3] if len(vals) >= 3 else False
+                contracting_now = currently_contracting and not was_already_contracting
+
+                # 2026-10-04, a pedido explicito del usuario ("la
+                # confirmacion de que estan cerrando la da las dos bandas a
+                # la misma vez"): no alcanza con que el ANCHO total baje
+                # (podria bajar por una sola banda moviendose) -- se exige
+                # que la banda SUPERIOR baje Y la banda INFERIOR suba en
+                # las mismas barras, las dos achicandose hacia el centro al
+                # mismo tiempo.
+                if contracting_now:
+                    u = upper.iloc[i - GAP_BAND_CLOSE_CONTRACTION_BARS - 1:i + 1]
+                    l = lower.iloc[i - GAP_BAND_CLOSE_CONTRACTION_BARS - 1:i + 1]
+                    if u.isna().any() or l.isna().any():
+                        contracting_now = False
+                    else:
+                        uv, lv = u.tolist(), l.tolist()
+                        upper_falling = all(uv[k] < uv[k - 1] for k in range(-GAP_BAND_CLOSE_CONTRACTION_BARS, 0))
+                        lower_rising = all(lv[k] > lv[k - 1] for k in range(-GAP_BAND_CLOSE_CONTRACTION_BARS, 0))
+                        contracting_now = upper_falling and lower_rising
+
+    if contracting_now and opened_above:
+        signal = "buy_put"
+    elif contracting_now and opened_below:
+        signal = "buy_call"
+
+    historical_volumes = volumes.iloc[:-1]
+    nonzero_volumes = historical_volumes[historical_volumes > 0]
+    enough_volume_data = len(nonzero_volumes) >= VOLUME_LOOKBACK
+    avg_volume = float(nonzero_volumes.iloc[-VOLUME_LOOKBACK:].mean()) if len(nonzero_volumes) > 0 else 0.0
+    last_volume = float(volumes.iloc[-1])
+    volume_ratio = (last_volume / avg_volume) if avg_volume else 0.0
+    high_volume = enough_volume_data and last_volume > avg_volume
+    if signal != "none" and not high_volume:
+        signal = "none"
+
+    strong_volume = enough_volume_data and volume_ratio >= STRONG_VOLUME_MULT
+    volatility_strength = "extrema" if strong_volume else "regular"
+    profit_target_pct = _scaled_profit_target(volume_ratio)
+    last_close = float(closes.iloc[-1])
+    last_sma = float(sma.iloc[-1]) if _notna(sma.iloc[-1]) else last_close
+    last_upper = float(upper.iloc[-1]) if _notna(upper.iloc[-1]) else last_close
+    last_lower = float(lower.iloc[-1]) if _notna(lower.iloc[-1]) else last_close
+    last_width = float(width_pct.iloc[-1]) if _notna(width_pct.iloc[-1]) else 0.0
+
+    force_eod_exit = False
+    try:
+        force_eod_exit = is_near_session_close(last_ts)
+    except (AttributeError, TypeError, ValueError):
+        pass
+
+    gap_desc = (
+        f"Apertura de hoy ({'arriba' if opened_above else 'abajo' if opened_below else 'DENTRO'} de la banda). "
+        f"{'SI' if contracting_now else 'NO'} es la barra donde la banda empieza a cerrarse "
+        f"({GAP_BAND_CLOSE_CONTRACTION_BARS} barras seguidas de ancho bajando, ancho actual {last_width:.2f}%)."
+    )
+    volume_desc = (
+        f"Volumen de la barra: {last_volume:,.0f} vs promedio de las ultimas {VOLUME_LOOKBACK} barras "
+        f"con volumen real {avg_volume:,.0f} ({volume_ratio:.2f}x) -> volatilidad {volatility_strength}."
+        if enough_volume_data else
+        f"Volumen de la barra: {last_volume:,.0f}. AVISO: no hay suficiente historial de volumen real "
+        f"para comparar -> no se confirma volumen alto con estos datos."
+    )
+    exit_plan_desc = (
+        f"Plan de salida: tomar ganancia al +{profit_target_pct*100:.0f}% sobre la prima pagada "
+        f"(volatilidad {volatility_strength}); cortar perdida al -{STOP_LOSS_PCT*100:.0f}%; o cerrar antes "
+        f"por senal tecnica de reversion o cierre de sesion -- mismas reglas de salida que las otras estrategias."
+    )
+    reason = (
+        f"[Fade de cierre de banda tras apertura afuera {BB_PERIOD},{BB_STD} | {interval} | "
+        f"{last_ts:%Y-%m-%d %H:%M}] Estrategia a pedido explicito del usuario (2026-10-04, backtest real "
+        f"+0.037% con volumen -- margen chico, implementada igual): {gap_desc} {volume_desc} {exit_plan_desc}"
+    )
+
+    return {
+        "symbol": symbol,
+        "strategy": "gap_band_close_fade",
+        "interval": interval,
+        "timestamp": last_ts.isoformat(),
+        "signal": signal,
+        "reason": reason,
+        "band_tightness_explanation": gap_desc,
+        "volume_explanation": volume_desc,
+        "exit_plan_explanation": exit_plan_desc,
+        "last_close": last_close,
+        "sma": last_sma,
+        "upper_band": last_upper,
+        "lower_band": last_lower,
+        "band_width_pct": last_width,
+        "band_width_percentile": None,
+        "consecutive_squeeze_bars": None,
+        "was_squeezed": None,
+        "volume": last_volume,
+        "avg_volume": avg_volume,
+        "volume_ratio": volume_ratio,
+        "high_volume": high_volume,
+        "enough_volume_data": enough_volume_data,
+        "strong_volume": strong_volume,
+        "volatility_strength": volatility_strength,
+        "profit_target_pct": profit_target_pct,
+        "stop_loss_pct": STOP_LOSS_PCT,
+        "exit_long_signal": False,
+        "exit_short_signal": False,
+        "force_eod_exit": force_eod_exit,
+        "opened_above": opened_above,
+        "opened_below": opened_below,
     }
 
 
@@ -1118,7 +1556,7 @@ def detect_opening_range_breakout(symbol: str, interval: str = DEFAULT_INTERVAL,
 
     strong_volume = enough_volume_data and volume_ratio >= STRONG_VOLUME_MULT
     volatility_strength = "extrema" if strong_volume else "regular"
-    profit_target_pct = _extreme_profit_target(volume_ratio) if strong_volume else PROFIT_TARGET_REGULAR_PCT
+    profit_target_pct = _scaled_profit_target(volume_ratio)
 
     force_eod_exit = False
     try:
@@ -1284,7 +1722,7 @@ def detect_volatility_breakout(symbol: str, interval: str = DEFAULT_INTERVAL, pe
 
     strong_volume = enough_volume_data and volume_ratio >= STRONG_VOLUME_MULT
     volatility_strength = "extrema" if strong_volume else "regular"
-    profit_target_pct = _extreme_profit_target(volume_ratio) if strong_volume else PROFIT_TARGET_REGULAR_PCT
+    profit_target_pct = _scaled_profit_target(volume_ratio)
 
     force_eod_exit = False
     try:
@@ -1390,6 +1828,29 @@ SMA_TURN_MIN_CONSISTENT_BARS = 3    # de esas barras previas, cuantas deben ir e
 SMA_TURN_MAGNITUDE_LOOKBACK = 20    # barras para el promedio de pendiente "tipica" de la SMA
 SMA_TURN_MIN_MAGNITUDE_RATIO = 1.1  # el giro debe ser al menos esto veces mas fuerte que lo tipico
 
+# Investigacion real 2026-10-01 (44 tickers, 60 dias, 15m): los giros
+# detectados en la ultima hora y media de sesion rinden consistentemente
+# peor que el resto del dia -- 43% acierto / -0.234% promedio (n=667) vs
+# 46-47% / -0.04 a -0.06% en apertura y mediodia, y empeora aun mas en
+# out-of-sample (-0.302%). No concentrado en 1-2 tickers (amplio: GDX,
+# MSTR, RGTI, MARA, MDB, SQQQ, TQQQ, HOOD, NET, etc). Se bloquean entradas
+# NUEVAS de giro_sma20 dentro de esta ventana.
+GIRO_LATE_SESSION_BLOCK_MINUTES = 90
+
+# 2026-10-01, a pedido del usuario tras revisar las entradas reales del
+# dia: VXX entro con giro_sma20 BUY_CALL y cerro en stop-loss (-24.88%).
+# Esto coincide con el backtest real del mismo dia (44 tickers, 60 dias):
+# probando giro_sma20 CALL en productos de decaimiento estructural como
+# GRUPO no fue concluyente (VXX/UVXY/TZA/SOXS/SQQQ/SPXU no rindieron peor
+# que acciones normales en conjunto), pero DESGLOSADO POR TICKER, VXX y
+# UVXY especificamente rindieron negativo mientras TZA/SOXS rindieron
+# positivo -- por eso NO se bloquean todos los productos apalancados/de
+# decaimiento, solo estos dos (misma logica que el analisis "individual,
+# no en grupo" del backtest). Solo aplica al lado CALL -- apostar a que
+# VXX/UVXY SUBAN pelea contra su tendencia estructural de fondo (contango
+# / rebalanceo diario); el lado PUT (a favor de esa tendencia) no se toca.
+GIRO_CALL_BLOCKED_TICKERS = {"VXX", "UVXY"}
+
 
 def detect_sma_turn(symbol: str, interval: str = DEFAULT_INTERVAL, period: str = DEFAULT_PERIOD,
                      raw_hist=None) -> dict:
@@ -1444,6 +1905,18 @@ def detect_sma_turn(symbol: str, interval: str = DEFAULT_INTERVAL, period: str =
     elif prior_trend == "bajista" and current_slope > 0 and is_pronounced:
         signal = "buy_call"
 
+    blocked_late_session = False
+    if signal != "none":
+        mins_to_close = _minutes_until_market_close(last_ts)
+        if mins_to_close is None or mins_to_close <= GIRO_LATE_SESSION_BLOCK_MINUTES:
+            blocked_late_session = True
+            signal = "none"
+
+    blocked_call_ticker = False
+    if signal == "buy_call" and symbol.upper() in GIRO_CALL_BLOCKED_TICKERS:
+        blocked_call_ticker = True
+        signal = "none"
+
     # Mismo tratamiento de volumen que las otras estrategias, para fijar el
     # objetivo de ganancia con el mismo criterio que ya se usa por defecto.
     historical_volumes = volumes.iloc[:-1]
@@ -1454,7 +1927,7 @@ def detect_sma_turn(symbol: str, interval: str = DEFAULT_INTERVAL, period: str =
     volume_ratio = (last_volume / avg_volume) if avg_volume else 0.0
     strong_volume = enough_volume_data and volume_ratio >= STRONG_VOLUME_MULT
     volatility_strength = "extrema" if strong_volume else "regular"
-    profit_target_pct = _extreme_profit_target(volume_ratio) if strong_volume else PROFIT_TARGET_REGULAR_PCT
+    profit_target_pct = _scaled_profit_target(volume_ratio)
 
     force_eod_exit = False
     try:
@@ -1482,9 +1955,22 @@ def detect_sma_turn(symbol: str, interval: str = DEFAULT_INTERVAL, period: str =
         f"(volatilidad {volatility_strength}); cortar perdida al -{STOP_LOSS_PCT*100:.0f}%; o cerrar antes "
         f"por senal tecnica de reversion o cierre de sesion -- mismas reglas de salida que las otras estrategias."
     )
+    late_session_desc = (
+        f" BLOQUEADO: dentro de los ultimos {GIRO_LATE_SESSION_BLOCK_MINUTES} min de sesion "
+        f"(investigacion real 2026-10-01: esta ventana rinde 43%/-0.234% vs 46-47% el resto del dia) "
+        f"-- no se abren posiciones nuevas aunque el giro se haya detectado."
+        if blocked_late_session else ""
+    )
+    call_ticker_desc = (
+        f" BLOQUEADO: {symbol.upper()} esta en la lista de tickers donde NO se compran CALLS con esta "
+        f"estrategia (backtest real 2026-10-01 + perdida real del mismo dia por -24.88%: apostar a que "
+        f"{symbol.upper()} suba pelea contra su tendencia estructural de fondo)."
+        if blocked_call_ticker else ""
+    )
     reason = (
         f"[Giro de SMA20 {BB_PERIOD},{BB_STD} | {interval} | {last_ts:%Y-%m-%d %H:%M}] "
         f"Estrategia A FAVOR del nuevo giro (no en contra): {turn_desc} {volume_desc} {exit_plan_desc}"
+        f"{late_session_desc}{call_ticker_desc}"
     )
 
     return {
@@ -1520,6 +2006,8 @@ def detect_sma_turn(symbol: str, interval: str = DEFAULT_INTERVAL, period: str =
         "prior_trend": prior_trend,
         "current_slope_pct": current_slope,
         "magnitude_ratio": magnitude_ratio,
+        "blocked_late_session": blocked_late_session,
+        "blocked_call_ticker": blocked_call_ticker,
     }
 
 
@@ -1603,7 +2091,7 @@ def detect_rsi_reversal(symbol: str, interval: str = DEFAULT_INTERVAL, period: s
         signal = "none"
 
     volatility_strength = "extrema" if strong_volume else "regular"
-    profit_target_pct = _extreme_profit_target(volume_ratio) if strong_volume else PROFIT_TARGET_REGULAR_PCT
+    profit_target_pct = _scaled_profit_target(volume_ratio)
 
     force_eod_exit = False
     try:
@@ -1760,7 +2248,7 @@ def detect_vwap_cross(symbol: str, interval: str = DEFAULT_INTERVAL, period: str
         signal = "none"
 
     volatility_strength = "extrema" if strong_volume else "regular"
-    profit_target_pct = _extreme_profit_target(volume_ratio) if strong_volume else PROFIT_TARGET_REGULAR_PCT
+    profit_target_pct = _scaled_profit_target(volume_ratio)
 
     force_eod_exit = False
     try:
@@ -1834,6 +2322,193 @@ def detect_vwap_cross(symbol: str, interval: str = DEFAULT_INTERVAL, period: str
     }
 
 
+# ---------------------------------------------------------------------------
+# Liquidity Sweep (estilo ICT/Smart Money Concepts, añadida 2026-10-01 a
+# pedido del usuario tras investigar LuxAlgo/SMC): la mecha de una vela
+# SUPERA un swing high/low reciente (donde se acumulan stops) pero el
+# CIERRE de esa misma vela queda de nuevo adentro del rango -- "barrido de
+# liquidez" seguido de rechazo.
+#
+# Backtest real (44 tickers, 60 dias, 15m, forward 4 barras/1h):
+#   - La señal SOLA (sin filtro): n=3,155, 50% acierto, +0.026% promedio,
+#     estable OOS (+0.023%->+0.029%) pero demasiado chico para cubrir el
+#     spread real (~0.65% de bid/ask en entrada+salida) -- no vale por si
+#     sola.
+#   - Momentum de la vela anterior: NO aporta nada (favor/contra ambos
+#     ~50%/+0.01-0.03%, ruido puro) -- no se usa como filtro.
+#   - CONFIANZA ALTA (tendencia real de 1h alineada, mismo mecanismo que
+#     confirmation_for_signal/get_trend ya usado por todas las estrategias):
+#     n=404, 60% acierto, +0.359% promedio, ESTABLE y MEJORA en OOS
+#     (62%/+0.307% -> 58%/+0.411%). Amplio entre tickers (positivo en ~35
+#     de 44), no concentrado en 1-2 nombres. confianza media/baja: ~48-49%,
+#     planas o negativas -- sin edge.
+#
+# Por eso esta estrategia SOLO emite la señal si la confianza (calculada
+# en scan_all_signals via confirmation_for_signal, la misma tendencia real
+# de 1h) resulta "alta" -- ver filtro aplicado en scan_all_signals.
+# ---------------------------------------------------------------------------
+
+LIQUIDITY_SWEEP_SWING_K = 3           # barras a cada lado para confirmar un swing high/low (fractal)
+LIQUIDITY_SWEEP_LOOKBACK_BARS = 30    # cuantas barras atras se busca el swing que se barre
+
+
+def detect_liquidity_sweep(symbol: str, interval: str = DEFAULT_INTERVAL, period: str = DEFAULT_PERIOD,
+                            raw_hist=None) -> dict:
+    """Detecta un barrido de liquidez: la mecha de la ultima vela cerrada
+    supera un swing high/low reciente pero el cierre rechaza de vuelta
+    adentro del rango -- señal de reversion a favor del rechazo (SOLO se
+    usa cuando la tendencia real de 1h confirma, ver nota arriba; sin esa
+    confirmacion esta estrategia no tiene edge real)."""
+    hist = raw_hist if raw_hist is not None else _fetch_history(symbol, period, interval)
+    hist = hist.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+    hist = _drop_unclosed_bar(hist, interval)
+    min_bars = LIQUIDITY_SWEEP_LOOKBACK_BARS + 2 * LIQUIDITY_SWEEP_SWING_K + VOLUME_LOOKBACK + 5
+    if len(hist) < min_bars:
+        raise ValueError(
+            f"No hay suficiente historial de '{symbol}' en intervalo {interval}/{period} "
+            f"para evaluar un barrido de liquidez."
+        )
+
+    high = hist["High"].values
+    low = hist["Low"].values
+    close = hist["Close"].values
+    n = len(hist)
+    last_ts = hist.index[-1]
+    i = n - 1
+    k = LIQUIDITY_SWEEP_SWING_K
+
+    confirmed_end = i - k
+    start = max(0, confirmed_end - LIQUIDITY_SWEEP_LOOKBACK_BARS)
+    recent_swing_highs = []
+    recent_swing_lows = []
+    for j in range(start, confirmed_end):
+        window_h = high[max(0, j - k):j + k + 1]
+        window_l = low[max(0, j - k):j + k + 1]
+        if len(window_h) == 2 * k + 1:
+            if high[j] == window_h.max():
+                recent_swing_highs.append(high[j])
+            if low[j] == window_l.min():
+                recent_swing_lows.append(low[j])
+
+    signal = "none"
+    swept_level = None
+    swept_type = None
+    if recent_swing_highs:
+        level = max(recent_swing_highs)
+        if high[i] > level and close[i] < level:
+            signal = "buy_put"
+            swept_level = level
+            swept_type = "swing high"
+    if signal == "none" and recent_swing_lows:
+        level = min(recent_swing_lows)
+        if low[i] < level and close[i] > level:
+            signal = "buy_call"
+            swept_level = level
+            swept_type = "swing low"
+
+    volumes = hist["Volume"]
+    historical_volumes = volumes.iloc[:-1]
+    nonzero_volumes = historical_volumes[historical_volumes > 0]
+    enough_volume_data = len(nonzero_volumes) >= VOLUME_LOOKBACK
+    avg_volume = float(nonzero_volumes.iloc[-VOLUME_LOOKBACK:].mean()) if len(nonzero_volumes) > 0 else 0.0
+    last_volume = float(volumes.iloc[-1])
+    volume_ratio = (last_volume / avg_volume) if avg_volume else 0.0
+    high_volume = enough_volume_data and last_volume > avg_volume
+    strong_volume = enough_volume_data and volume_ratio >= STRONG_VOLUME_MULT
+    volatility_strength = "extrema" if strong_volume else "regular"
+    profit_target_pct = _scaled_profit_target(volume_ratio)
+    last_close = float(close[i])
+
+    force_eod_exit = False
+    try:
+        force_eod_exit = is_near_session_close(last_ts)
+    except (AttributeError, TypeError, ValueError):
+        pass
+
+    sweep_desc = (
+        f"Barrido de {swept_type} en {swept_level:.2f}: la mecha de la barra lo supera pero el cierre "
+        f"({last_close:.2f}) rechaza de vuelta adentro -- liquidez tomada, se opera a favor del rechazo."
+        if signal != "none" else
+        "Sin barrido de liquidez en la ultima barra (ninguna mecha supero un swing reciente con rechazo "
+        "de cierre adentro del rango)."
+    )
+    volume_desc = (
+        f"Volumen de la barra: {last_volume:,.0f} vs promedio de las ultimas {VOLUME_LOOKBACK} barras "
+        f"con volumen real {avg_volume:,.0f} ({volume_ratio:.2f}x) -> volatilidad {volatility_strength}."
+        if enough_volume_data else
+        f"Volumen de la barra: {last_volume:,.0f}. AVISO: no hay suficiente historial de volumen real "
+        f"para comparar -> se usa el objetivo de ganancia regular por defecto."
+    )
+    exit_plan_desc = (
+        f"Plan de salida: tomar ganancia al +{profit_target_pct*100:.0f}% sobre la prima pagada "
+        f"(volatilidad {volatility_strength}); cortar perdida al -{STOP_LOSS_PCT*100:.0f}%; o cerrar antes "
+        f"por senal tecnica de reversion o cierre de sesion -- mismas reglas de salida que las otras estrategias."
+    )
+    reason = (
+        f"[Barrido de liquidez | {interval} | {last_ts:%Y-%m-%d %H:%M}] Estrategia A FAVOR del rechazo "
+        f"(SOLO cuenta con confianza alta de 1h, ver scan_all_signals): {sweep_desc} {volume_desc} {exit_plan_desc}"
+    )
+
+    return {
+        "symbol": symbol,
+        "strategy": "liquidity_sweep",
+        "interval": interval,
+        "timestamp": last_ts.isoformat(),
+        "signal": signal,
+        "reason": reason,
+        "band_tightness_explanation": sweep_desc,
+        "volume_explanation": volume_desc,
+        "exit_plan_explanation": exit_plan_desc,
+        "last_close": last_close,
+        "sma": swept_level if swept_level is not None else last_close,
+        "upper_band": swept_level if swept_level is not None else last_close,
+        "lower_band": swept_level if swept_level is not None else last_close,
+        "band_width_pct": 0.0,
+        "band_width_percentile": None,
+        "consecutive_squeeze_bars": None,
+        "was_squeezed": None,
+        "volume": last_volume,
+        "avg_volume": avg_volume,
+        "volume_ratio": volume_ratio,
+        "high_volume": high_volume,
+        "enough_volume_data": enough_volume_data,
+        "strong_volume": strong_volume,
+        "volatility_strength": volatility_strength,
+        "profit_target_pct": profit_target_pct,
+        "stop_loss_pct": STOP_LOSS_PCT,
+        "exit_long_signal": False,
+        "exit_short_signal": False,
+        "force_eod_exit": force_eod_exit,
+        "swept_level": swept_level,
+        "swept_type": swept_type,
+    }
+
+
+def _bar_extreme_context(raw_hist, interval: str, signal: str) -> tuple[float | None, float | None]:
+    """2026-09-18, a pedido del usuario tras el caso MU (MU entro al cierre de
+    una vela en el maximo del dia y retrocedio): devuelve (clv, day_pos) de la
+    ULTIMA vela cerrada, en la direccion de la señal -- 1.0 = en el extremo a
+    favor. clv = donde cerro dentro del rango de la vela; day_pos = donde esta
+    dentro del rango de la sesion regular del dia hasta ahora. SOLO REGISTRO:
+    ninguna decision de entrada usa estos valores todavia (backtest de 58
+    sesiones: clv>=0.90 y day_pos>=0.90 rindieron -0.03% a 30 min contra
+    +0.28% el resto; se valida con datos reales antes de filtrar)."""
+    try:
+        h = _drop_unclosed_bar(raw_hist.dropna(subset=["Open", "High", "Low", "Close"]), interval)
+        last, ts = h.iloc[-1], h.index[-1]
+        close, rng = float(last["Close"]), float(last["High"]) - float(last["Low"])
+        clv = (close - float(last["Low"])) / rng if rng > 0 else None
+        day = h[(h.index.date == ts.date()) & (h.index.time >= dtime(9, 30)) & (h.index.time <= dtime(15, 45))]
+        day_hi, day_lo = float(day["High"].max()), float(day["Low"].min())
+        pos = (close - day_lo) / (day_hi - day_lo) if day_hi > day_lo else None
+        if signal == "buy_put":
+            clv = None if clv is None else 1.0 - clv
+            pos = None if pos is None else 1.0 - pos
+        return (None if clv is None else round(clv, 3)), (None if pos is None else round(pos, 3))
+    except Exception:
+        return None, None
+
+
 def scan_all_signals(symbol: str, interval: str = DEFAULT_INTERVAL, period: str = DEFAULT_PERIOD) -> list[dict]:
     """Corre TODAS las estrategias disponibles (squeeze_breakout,
     gap_fade_apertura, giro_sma20, vwap_cross) sobre `symbol`, reutilizando
@@ -1847,18 +2522,40 @@ def scan_all_signals(symbol: str, interval: str = DEFAULT_INTERVAL, period: str 
     trends = multi_timeframe_trends(symbol, raw_hist_by_interval=raw_hist_by_interval)
 
     results = []
-    for detector in (analyze, detect_opening_gap_fade, detect_sma_turn, detect_vwap_cross, detect_rsi_reversal):
+    for detector in (analyze, detect_opening_gap_fade, detect_sma_turn, detect_vwap_cross, detect_rsi_reversal,
+                      detect_liquidity_sweep, detect_gap_band_close_fade):
         result = detector(symbol, interval=interval, period=period, raw_hist=raw_hist)
         confirmation = confirmation_for_signal(result["signal"], trends)
         result["mtf_trends"] = trends
         result["confidence"] = confirmation["confidence"]
         result["confidence_detail"] = confirmation
+        # liquidity_sweep: el backtest real (ver nota junto a
+        # detect_liquidity_sweep) solo encontro edge con confianza alta
+        # (n=404, 60%/+0.359%, OOS-estable) -- confianza media/baja no
+        # tienen edge, asi que aqui SI se bloquea la señal (a diferencia
+        # de las demas estrategias, donde la confianza es informativa).
+        if result["strategy"] == "liquidity_sweep" and result["signal"] != "none" and result["confidence"] != "alta":
+            result["signal"] = "none"
+            result["reason"] += (
+                f" BLOQUEADO: confianza de 1h es '{confirmation['confidence']}', no 'alta' -- "
+                f"sin ese respaldo esta estrategia no tiene edge real (ver backtest 2026-10-01)."
+            )
+        if result["signal"] in ("buy_call", "buy_put"):
+            result["clv"], result["day_pos"] = _bar_extreme_context(raw_hist, interval, result["signal"])
         results.append(result)
 
     # Entrada temprana (vela en formacion, ver analyze_forming_bar arriba)
     # -- solo se evalua si squeeze_breakout normal (vela cerrada, results[0]
     # porque analyze() es el primer detector) NO disparo ya una señal, para
     # no duplicar la misma entrada dos veces en el mismo ciclo.
+    #
+    # PAUSADA 2026-09-18 (23.1%/35.3% acierto, peor que el azar, logica
+    # vieja de margen). REACTIVADA 2026-10-02 a pedido explicito del
+    # usuario ("activala con la logica que hay en la foto") con la logica
+    # NUEVA de toque+impulso (ver analyze_forming_bar), no la que fallo en
+    # septiembre -- no hay backtest fresco de esta version todavia. Para
+    # REVERTIR: volver a False.
+    SQUEEZE_BREAKOUT_TEMPRANO_ENABLED = True
     if results[0]["signal"] == "none":
         early = analyze_forming_bar(symbol, interval=interval, period=period)
         if early is not None:
@@ -1866,7 +2563,8 @@ def scan_all_signals(symbol: str, interval: str = DEFAULT_INTERVAL, period: str 
             early["mtf_trends"] = trends
             early["confidence"] = confirmation["confidence"]
             early["confidence_detail"] = confirmation
-            results.append(early)
+            if SQUEEZE_BREAKOUT_TEMPRANO_ENABLED:
+                results.append(early)
 
     return results
 
@@ -1946,6 +2644,22 @@ EARLY_REJECTION_WINDOW_MINUTES = 30
 TRAILING_GIVEBACK_THRESHOLD_PCT = 0.05  # a partir de +5% de pico visto
 TRAILING_GIVEBACK_FRACTION = 0.5        # no se deja devolver mas de la mitad de ese pico
 
+# 2026-09-17, a pedido del usuario ("si el impulso frena en 15% ahi
+# vendes no esperas a que gire de vuelta y baje la ganancia porque no
+# tiene sentido"): la regla de arriba (trailing giveback) protege ganancia
+# UNA VEZ que ya empezo a devolverse -- esta regla actua ANTES de eso: si
+# el impulso llega a un nivel bueno (MOMENTUM_STALL_PNL_THRESHOLD_PCT) y
+# se ESTANCA ahi (no hace un nuevo maximo de pico) durante
+# MOMENTUM_STALL_SECONDS, se toma la ganancia ya, sin esperar a que
+# empiece a caer siquiera. El llamador mide cuanto tiempo paso desde el
+# ultimo nuevo maximo de pico (seconds_since_peak_update) -- ver
+# multi_user_entry.py, donde el pico ahora guarda tambien el timestamp de
+# cuando se actualizo por ultima vez.
+# Bajado de 15% a 10% (2026-09-17, a pedido del usuario: "cuando empiece
+# a subir el %, si pasa el 10% y ahi se detiene, vendes el contrato").
+MOMENTUM_STALL_PNL_THRESHOLD_PCT = 0.10
+MOMENTUM_STALL_SECONDS = 60
+
 
 def evaluate_open_position_exit(
     entry_premium: float,
@@ -1959,6 +2673,9 @@ def evaluate_open_position_exit(
     minutes_since_entry: float = 0.0,
     quick_profit_pct: float = QUICK_PROFIT_PCT,
     peak_pnl_pct: float | None = None,
+    seconds_since_peak_update: float | None = None,
+    near_close: bool = False,
+    weekly_aligned: bool = True,
 ) -> dict:
     """Decide si cerrar una posicion abierta ahora mismo, y por que. Orden
     de prioridad (lo que ocurra primero):
@@ -1975,6 +2692,17 @@ def evaluate_open_position_exit(
          con el riesgo que eso agrega (gaps fuera de horario, caida de la
          prima por el paso de los dias) a cambio de mas tiempo para
          alcanzar el objetivo. Ver INCIDENTS.md y CLAUDE.md.
+      3.5) near_close=True (faltan <= EOD_FORCE_CLOSE_MINUTES_BEFORE_CLOSE
+         minutos para el cierre real de la sesion) Y la posicion esta en
+         ganancia (pnl_pct > 0) -> asegurar esa ganancia YA. 2026-09-22, a
+         pedido del usuario ("si en una posicion abierta esta dando
+         ganancia y se aproxima la hora de cierre... tomamos ganancia y
+         cerramos"): desde el cambio de 2026-09-09 las posiciones quedan
+         overnight, lo que expone una ganancia ya lograda al riesgo de un
+         gap de apertura al dia siguiente sin necesidad -- si ya hay
+         ganancia, no hace falta arriesgarla toda la noche por mas. Una
+         posicion en PERDIDA cerca del cierre NO se toca por esta regla
+         (se deja seguir el plan normal: stop-loss o esperar recuperacion).
       4) rejection_signal=True (el precio volvio a cruzar hacia ADENTRO de
          la banda que rompio al entrar -- no hace falta que cruce toda la
          banda media, eso es mucho mas lento) Y la posicion todavia NO esta
@@ -2008,6 +2736,21 @@ def evaluate_open_position_exit(
          llego al stop) -> NO se fuerza el cierre solo por la señal; el
          stop-loss sigue siendo el limite (evita salidas prematuras por
          ruido cuando ya se acepto ese riesgo al entrar).
+      11) (ULTIMO recurso, solo si NINGUNA regla anterior ya cerro la
+         posicion) near_close=True Y la posicion sigue en perdida (pnl<=0)
+         Y NO hay respaldo de tendencia en NINGUNO de los plazos
+         (hourly_aligned=False O weekly_aligned=False -- 1h, sesgo diario Y
+         semanal tienen que coincidir a favor) -> cerrar YA, no se deja
+         overnight. 2026-09-22, a pedido del usuario ("solo si... hay
+         seguridad que el proximo dia el mercado va a dar ganancia porque
+         continua a favor de la tendencia... permanece abierto, si antes
+         no cumplio con ninguna de las reglas antes puestas"; luego
+         "tiene que chequear la tendencia semanal tambien... tienen que
+         coincidir"): una perdida sin respaldo en los 3 plazos no tiene
+         razon real para esperar que mejore de un dia a otro, asi que se
+         realiza ahora en vez de arriesgar un gap sin fundamento. Si AMBOS
+         (hourly_aligned Y weekly_aligned) son True, esta regla NO actua --
+         la posicion queda abierta overnight como hasta ahora.
     """
     pnl_pct = (current_premium / entry_premium - 1) if entry_premium else 0.0
     target_price = compute_target_price(entry_premium, profit_target_pct)
@@ -2019,8 +2762,14 @@ def evaluate_open_position_exit(
         return {"should_close": True, "reason": "stop_loss", "pnl_pct": pnl_pct}
     if force_eod_exit:
         return {"should_close": True, "reason": "cierre_por_vencimiento", "pnl_pct": pnl_pct}
+    if near_close and pnl_pct > 0:
+        return {"should_close": True, "reason": "asegurar_ganancia_antes_del_cierre", "pnl_pct": pnl_pct}
     if rejection_signal and pnl_pct <= 0 and minutes_since_entry <= EARLY_REJECTION_WINDOW_MINUTES:
         return {"should_close": True, "reason": "rechazo_de_ruptura", "pnl_pct": pnl_pct}
+    if (peak_pnl_pct is not None and peak_pnl_pct >= MOMENTUM_STALL_PNL_THRESHOLD_PCT
+            and seconds_since_peak_update is not None
+            and seconds_since_peak_update >= MOMENTUM_STALL_SECONDS):
+        return {"should_close": True, "reason": "impulso_estancado", "pnl_pct": pnl_pct}
     if (peak_pnl_pct is not None and peak_pnl_pct >= TRAILING_GIVEBACK_THRESHOLD_PCT
             and pnl_pct <= peak_pnl_pct * TRAILING_GIVEBACK_FRACTION):
         return {"should_close": True, "reason": "asegurar_porcion_del_pico", "pnl_pct": pnl_pct}
@@ -2032,4 +2781,6 @@ def evaluate_open_position_exit(
         return {"should_close": True, "reason": "asegurar_ganancia_sin_respaldo_1h", "pnl_pct": pnl_pct}
     if minutes_since_entry >= QUICK_PROFIT_MIN_MINUTES and pnl_pct >= quick_profit_pct:
         return {"should_close": True, "reason": "toma_rapida_15m", "pnl_pct": pnl_pct}
+    if near_close and pnl_pct <= 0 and not (hourly_aligned and weekly_aligned):
+        return {"should_close": True, "reason": "cerrar_perdida_sin_respaldo_de_tendencia", "pnl_pct": pnl_pct}
     return {"should_close": False, "reason": "mantener", "pnl_pct": pnl_pct}

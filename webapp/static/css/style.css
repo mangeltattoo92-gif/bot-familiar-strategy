@@ -68,6 +68,25 @@
   --shadow: 0 1px 2px rgba(20, 22, 28, 0.04), 0 8px 24px rgba(20, 22, 28, 0.05);
 }
 
+/* 2026-10-04, a pedido explicito ("quiero que metabot se vea con esa
+   calidad... bien profecional"): identidad propia de Metabot (ambar/glow,
+   igual que el logo y la landing en /bienvenida) en vez del azul de
+   --accent de arriba -- SOLO donde la pagina trae la marca metabot
+   (dashboard.html/admin.html ponen esta clase en <body> segun
+   brand_space). Bot Familiar no lleva esta clase, sigue exactamente
+   igual que siempre (mismo azul, cero cambios para los 7 usuarios
+   reales de hoy). Reusa el MISMO token --accent que ya usan botones,
+   foco, pestañas activas, etc. -- no hace falta tocar ninguna de esas
+   reglas, cambia solo el valor.*/
+body.brand-metabot {
+  --accent: #ff9d4d;
+  --accent-soft: rgba(255, 157, 77, 0.16);
+}
+:root[data-theme="light"] body.brand-metabot {
+  --accent: #d9720f;
+  --accent-soft: rgba(217, 114, 15, 0.14);
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -103,20 +122,103 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  overflow: hidden;
   background:
     radial-gradient(700px circle at 15% 20%, var(--accent-soft), transparent 60%),
     radial-gradient(600px circle at 85% 80%, var(--green-soft), transparent 55%),
     var(--bg);
 }
 .login-card {
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: linear-gradient(165deg, color-mix(in srgb, white 5%, var(--panel)) 0%, var(--panel) 60%);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.06),
+    0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent),
+    0 30px 70px -20px color-mix(in srgb, var(--accent) 45%, transparent),
+    var(--shadow);
   padding: 2.5rem 2.25rem;
   width: 340px;
   text-align: center;
+  position: relative;
+  z-index: 1;
 }
+
+/* ---------- Mini-escena 3D decorativa (pure CSS, reusa --accent) ----------
+   2026-10-04, a pedido explicito ("hacelo al panel completo de metabot"):
+   mismos bloques flotantes con glow que el hero de /bienvenida, version
+   chica para usar de fondo detras de tarjetas (login, dashboard) sin
+   competir con el contenido real -- position:absolute + pointer-events:none,
+   no afecta layout ni JS de nada. */
+.mini-scene { position: absolute; perspective: 900px; pointer-events: none; z-index: 0; }
+.mini-scene .scene-floor {
+  position: absolute; left: 50%; bottom: 8%; width: 70%; height: 70%;
+  transform: translateX(-50%) rotateX(78deg);
+  background: radial-gradient(closest-side, var(--accent-soft), transparent 70%);
+  border-radius: 50%; filter: blur(2px);
+}
+.mini-scene .blocks {
+  position: absolute; inset: 0; transform-style: preserve-3d;
+  transform: rotateX(52deg) rotateZ(-38deg);
+  animation: mb-scene-spin 30s linear infinite;
+}
+@keyframes mb-scene-spin { from { transform: rotateX(52deg) rotateZ(-38deg); } to { transform: rotateX(52deg) rotateZ(322deg); } }
+.mini-scene .block {
+  position: absolute;
+  background: linear-gradient(160deg, var(--panel-2), var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.mini-scene .block::after {
+  content: ""; position: absolute; inset: auto 0 0 0; height: 36%; border-radius: 0 0 6px 6px;
+  background: linear-gradient(0deg, var(--accent) 0%, transparent 100%);
+  box-shadow: 0 0 18px 3px var(--accent), 0 0 42px 8px var(--accent-soft);
+}
+@media (prefers-reduced-motion: reduce) { .mini-scene .blocks { animation: none; } }
+/* Variante fija para paginas con scroll largo (dashboard) -- mismo
+   bloque reusado, pero position:fixed asi queda de ambiente en una
+   esquina del viewport en vez de moverse con el contenido; opacidad mas
+   baja porque aca compite con datos reales, no es la protagonista como
+   en login/landing. */
+.mini-scene-fixed { position: fixed; pointer-events: none; z-index: 0; opacity: 0.55; }
+@media (max-width: 860px) { .mini-scene-fixed { display: none; } }
+
+/* 2026-10-04: logo real en vez del cluster de bloques abstracto, pero
+   "en forma de circulo y que gire como giraba el anterior" -- circular,
+   con la misma inclinacion/giro 3D que tenian los bloques (perspective +
+   rotateX fijo + rotateZ animado), no plano. */
+.corner-logo-wrap {
+  position: fixed;
+  top: 78px;
+  right: 24px;
+  width: 140px;
+  height: 140px;
+  perspective: 450px;
+  pointer-events: none;
+  z-index: 0;
+}
+.corner-logo {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  opacity: 1;
+  transform-style: preserve-3d;
+  animation: corner-logo-spin 14s linear infinite;
+  filter: drop-shadow(0 0 20px var(--accent)) drop-shadow(0 0 60px var(--accent-soft)) drop-shadow(0 0 110px var(--accent-soft));
+}
+/* 2026-10-04, a pedido explicito ("que se vea en segunda persona y que
+   afecte visualmente"): perspectiva mas cerrada (450px, antes 700) +
+   mas inclinacion (34deg, antes 18) para que el giro 3D se note de
+   verdad -- antes se notaba casi plano. Mas grande (240px, antes 170)
+   y con mas glow para que tenga peso real en la pagina. */
+@keyframes corner-logo-spin {
+  from { transform: rotateX(34deg) rotateZ(0deg); }
+  to { transform: rotateX(34deg) rotateZ(360deg); }
+}
+@media (prefers-reduced-motion: reduce) { .corner-logo { animation: none; } }
+@media (max-width: 860px) { .corner-logo-wrap { display: none; } }
 .login-card h1 {
   font-size: 1.35rem;
   margin: 0.75rem 0 0.15rem;
@@ -124,18 +226,11 @@ body {
 }
 .login-mark {
   width: auto;
-  height: 44px;
+  max-width: 210px;
+  height: auto;
   margin: 0 auto;
-  padding: 0 1rem;
-  border-radius: 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: 1rem;
-  letter-spacing: 0.04em;
-  color: white;
-  background: linear-gradient(135deg, var(--accent), #9b6bff);
+  display: block;
+  border-radius: 16px;
   box-shadow: 0 6px 16px var(--accent-soft);
 }
 .login-card form { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 1.5rem; text-align: left; }
@@ -155,16 +250,17 @@ body {
 .login-card button {
   margin-top: 1.25rem;
   padding: 0.7rem;
-  background: var(--accent);
+  background: linear-gradient(165deg, color-mix(in srgb, white 18%, var(--accent)) 0%, var(--accent) 55%, color-mix(in srgb, black 12%, var(--accent)) 100%);
   color: white;
   border: none;
   border-radius: var(--radius-sm);
   font-size: 0.95rem;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  transition: filter 0.15s ease, transform 0.1s ease;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.25) inset, 0 10px 26px -8px color-mix(in srgb, var(--accent) 65%, transparent);
+  transition: filter 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
 }
-.login-card button:hover { filter: brightness(1.08); }
+.login-card button:hover { filter: brightness(1.08); box-shadow: 0 1px 0 rgba(255,255,255,0.3) inset, 0 12px 30px -6px color-mix(in srgb, var(--accent) 75%, transparent); }
 .login-card button:active { transform: scale(0.98); }
 .alert {
   background: var(--red-soft);
@@ -191,22 +287,46 @@ body {
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
 }
+/* 2026-10-04, a pedido explicito ("te lo pedi todo en 3D"): halo ambiente
+   detras de la marca, mismo lenguaje que el glow del logo/hero -- sutil,
+   no compite con el contenido.
+   2026-10-05: el halo vivia en .topbar::before y .topbar tenia
+   overflow:hidden para contenerlo -- eso recortaba el menu "Mas"
+   (position:absolute, hijo de .topbar) y lo dejaba atrapado detras del
+   contenido de mas abajo. Se aisla el halo en su propia capa clipeada
+   (.topbar-glow) para que .topbar pueda quedar con overflow visible. */
+.topbar-glow {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+}
+.topbar-glow::before {
+  content: "";
+  position: absolute;
+  left: -40px;
+  top: 50%;
+  width: 220px;
+  height: 220px;
+  transform: translateY(-50%);
+  background: radial-gradient(circle, var(--accent-soft), transparent 70%);
+}
+.topbar > * { position: relative; }
+.topbar > .topbar-glow { position: absolute; }
 .brand { display: flex; align-items: center; gap: 0.65rem; }
 .brand-mark {
-  width: auto;
-  height: 28px;
-  padding: 0 0.55rem;
+  width: 32px;
+  height: 32px;
   border-radius: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: 0.7rem;
-  letter-spacing: 0.05em;
-  color: white;
-  background: linear-gradient(135deg, var(--accent), #9b6bff);
-  box-shadow: 0 4px 12px var(--accent-soft);
+  display: inline-block;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent),
+    0 4px 14px color-mix(in srgb, var(--accent) 45%, transparent),
+    0 1px 0 rgba(255,255,255,0.08) inset;
   flex-shrink: 0;
+  transition: box-shadow 0.2s ease;
 }
 .brand-name { font-size: 0.98rem; font-weight: 500; letter-spacing: -0.01em; color: var(--muted); }
 .brand-name strong { font-weight: 800; color: var(--text); }
@@ -255,6 +375,7 @@ body {
 .status-pill.open, .status-pill.on {
   color: var(--green);
   background: var(--green-soft);
+  box-shadow: 0 0 14px -3px rgba(47,212,143,.5);
 }
 .status-pill.open .dot, .status-pill.on .dot {
   background: var(--green);
@@ -396,6 +517,88 @@ body {
 }
 .theme-toggle:hover { background: var(--bg-soft); }
 
+/* 2026-09-17: campana de novedades -- cuando hay algo sin leer, la
+   campana entera se prende en amarillo con ondas de expansion (radar),
+   hasta que el usuario abre el modal y se marcan como leidas (ver
+   dashboard.js, que agrega/saca la clase has-unread). */
+.news-btn { position: relative; overflow: visible; width: 40px; height: 40px; }
+.news-btn svg { width: 20px; height: 20px; }
+.news-btn.has-unread {
+  color: #f5c518;
+  border-color: #f5c518;
+  background: rgba(245, 197, 24, 0.12);
+  box-shadow: 0 0 10px rgba(245, 197, 24, 0.55);
+  animation: news-glow 1.4s ease-in-out infinite;
+}
+.news-btn.has-unread::before,
+.news-btn.has-unread::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid #f5c518;
+  animation: news-ripple 1.8s ease-out infinite;
+  pointer-events: none;
+}
+.news-btn.has-unread::after { animation-delay: 0.9s; }
+@keyframes news-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(245, 197, 24, 0.45); }
+  50% { box-shadow: 0 0 16px rgba(245, 197, 24, 0.85); }
+}
+@keyframes news-ripple {
+  0% { transform: scale(1); opacity: 0.9; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+.news-item { padding: 0.85rem 0; border-bottom: 1px solid var(--border); }
+.news-item:last-child { border-bottom: none; }
+.news-item-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.3rem; }
+.news-item p { margin: 0; font-size: 0.88rem; line-height: 1.5; color: var(--muted); }
+.news-item-unread { position: relative; padding-left: 0.9rem; }
+.news-item-unread::before {
+  content: ""; position: absolute; left: 0; top: 0.95rem;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+}
+
+/* 2026-09-28, a pedido del usuario: soporte tecnico dentro de la app,
+   hilo privado por cuenta. Mismo patron visual que .news-item pero en
+   forma de chat (burbujas alineadas segun quien escribio). */
+.support-thread {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.4rem 0.1rem;
+}
+.support-msg {
+  max-width: 82%;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  word-wrap: break-word;
+}
+.support-msg p { margin: 0; }
+.support-msg-time { display: block; font-size: 0.68rem; color: var(--muted); margin-top: 0.2rem; }
+.support-msg-user { align-self: flex-end; background: var(--accent); color: #fff; }
+.support-msg-user .support-msg-time { color: rgba(255,255,255,0.75); }
+.support-msg-admin { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); }
+.support-form { display: flex; gap: 0.5rem; align-items: flex-end; margin-top: 0.6rem; }
+.support-form textarea {
+  flex: 1;
+  resize: none;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  font-family: inherit;
+  outline: none;
+}
+.support-form textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.support-form button { flex-shrink: 0; padding: 0.55rem 0.9rem; }
+
 .user-chip {
   width: 30px; height: 30px;
   border-radius: 50%;
@@ -423,17 +626,47 @@ main {
   gap: 1rem;
 }
 .card {
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: linear-gradient(150deg, var(--accent-soft), var(--panel) 65%);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
   padding: 1.25rem 1.4rem;
+  position: relative;
   transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.07),
+    0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent),
+    0 18px 40px -16px color-mix(in srgb, var(--accent) 40%, transparent),
+    var(--shadow);
 }
-.card:hover { transform: translateY(-2px); box-shadow: 0 1px 2px rgba(0,0,0,0.3), 0 16px 40px rgba(0,0,0,0.4); }
+/* 2026-10-04, a pedido explicito ("te lo pedi todo en 3D" / "se sigue
+   viendo igual"): TODAS las tarjetas llevan el glow de color ahora, no
+   solo la destacada -- antes .card-hero tenia el efecto fuerte y .card
+   (las 4 tarjetas de arriba del admin, por ejemplo) se quedaba con un
+   tratamiento casi imperceptible, por eso el admin parecia sin cambios
+   pese a que el deploy si habia funcionado. */
+.card:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.1),
+    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent),
+    0 24px 50px -14px color-mix(in srgb, var(--accent) 50%, transparent),
+    0 1px 2px rgba(0,0,0,0.3);
+}
 .card-hero {
   background: linear-gradient(150deg, var(--accent-soft), var(--panel) 65%);
-  border-color: color-mix(in srgb, var(--accent) 25%, var(--border));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent),
+    0 22px 48px -14px color-mix(in srgb, var(--accent) 45%, transparent),
+    var(--shadow);
+}
+.card-hero:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.1),
+    0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+    0 28px 58px -12px color-mix(in srgb, var(--accent) 55%, transparent),
+    0 1px 2px rgba(0,0,0,0.3);
 }
 .card-hero .card-value { font-size: 2rem; }
 .card-label { font-size: 0.78rem; color: var(--muted); font-weight: 500; }
@@ -454,11 +687,16 @@ main {
    mas denso, mas "dashboard profesional" que "tarjeta grande". */
 .stat-strip {
   display: flex;
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: linear-gradient(150deg, var(--accent-soft), var(--panel) 70%);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
   overflow-x: auto;
+  position: relative;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.07),
+    0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent),
+    0 20px 44px -16px color-mix(in srgb, var(--accent) 42%, transparent),
+    var(--shadow);
 }
 .stat-strip .stat {
   flex: 1 1 0;
@@ -572,6 +810,47 @@ main {
 .real-money-banner-title { font-size: 0.92rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .real-money-banner-sub { font-size: 0.82rem; color: var(--muted); margin-top: 0.25rem; }
 .real-money-banner-btn { flex-shrink: 0; white-space: nowrap; }
+.countdown {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.countdown-seg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 42px;
+  padding: 0.35rem 0.3rem 0.3rem;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.countdown-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--amber);
+  line-height: 1.1;
+}
+.countdown-lbl {
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 0.1rem;
+}
+.countdown-sep {
+  color: var(--muted);
+  font-weight: 700;
+  font-family: var(--font-mono);
+  transform: translateY(-0.55rem);
+}
+@media (max-width: 720px) {
+  .countdown { order: 3; width: 100%; justify-content: center; margin-top: 0.5rem; }
+}
 .badge-locked {
   display: inline-flex;
   align-items: center;
@@ -610,12 +889,21 @@ main {
 }
 
 .panel {
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: linear-gradient(170deg, color-mix(in srgb, white 3%, var(--panel)) 0%, var(--panel) 50%);
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border));
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
   padding: 1.4rem 1.5rem;
   scroll-margin-top: 5rem;
+  /* 2026-10-04, a pedido explicito ("la parte de abajo no tiene sombras"):
+     .panel (Salud del sistema, Soporte tecnico, Solicitudes, Posiciones...)
+     se habia quedado con un brillo casi invisible mientras .card (las 4
+     tarjetas de arriba) tenia el glow fuerte -- mismo nivel ahora, para
+     que TODA la pagina se vea consistente, no solo el primer tramo. */
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.06),
+    0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent),
+    0 18px 40px -18px color-mix(in srgb, var(--accent) 38%, transparent),
+    var(--shadow);
 }
 .panel-head {
   display: flex;
@@ -643,6 +931,60 @@ main {
 }
 .panel-toggle:hover { background: var(--bg-soft); color: var(--text); }
 .panel-toggle.collapsed svg { transform: rotate(-90deg); }
+
+.watchlist-add-btn {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+}
+.watchlist-add-btn:hover { background: var(--accent); color: #fff; }
+
+.list-enable-btn {
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--green);
+  background: var(--green-soft, color-mix(in srgb, var(--green) 16%, transparent));
+  color: var(--green);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.list-enable-btn:hover { filter: brightness(1.1); }
+.list-enable-btn.off {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--muted);
+}
+.list-enable-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.capital-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.5rem 0.1rem 0.8rem;
+  flex-wrap: wrap;
+}
+.watchlist-add-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0 0.8rem;
+  flex-wrap: wrap;
+}
 #account-chart-box, .collapsible {
   overflow: hidden;
   transition: max-height 0.25s ease, opacity 0.2s ease, margin 0.2s ease;
@@ -700,14 +1042,15 @@ th, td {
 td { font-variant-numeric: tabular-nums; }
 th {
   color: var(--muted);
-  font-weight: 600;
-  font-size: 0.68rem;
+  font-weight: 700;
+  font-size: 0.66rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
   padding-bottom: 0.65rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
 }
 tbody tr { transition: background-color 0.12s ease; }
-tbody tr:hover { background: var(--bg-soft); }
+tbody tr:hover { background: color-mix(in srgb, var(--accent) 5%, var(--bg-soft)); }
 tr:last-child td { border-bottom: none; }
 
 .positive { color: var(--green); }
@@ -1103,7 +1446,16 @@ input[type="range"].risk-slider::-moz-range-thumb {
 }
 
 @media (max-width: 720px) {
-  .topnav { display: none; }
+  /* 2026-10-05, a pedido explicito ("lo mismo que se corrigio en la PC
+     se corrija en el telefono"): antes se ocultaba TODO .topnav, lo que
+     dejaba "Mas" (Posiciones/Historial/Mercado/Dinero real/Suscripcion/
+     Panel de administrador/el toggle de marca del admin) inalcanzable
+     desde el celular. Ahora solo se oculta el link de texto "Resumen"
+     (la vista por defecto, no hace falta un boton para volver a ella) y
+     el boton "Mas" queda visible pero compacto. */
+  .topnav { gap: 0; }
+  .topnav > a[data-target="resumen"] { display: none; }
+  .nav-dropdown-btn { padding: 0.4rem 0.55rem; font-size: 0.8rem; }
   .topbar { padding: 0.7rem 1rem; }
   main { padding: 1.25rem 1rem 3rem; }
 }

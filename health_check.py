@@ -65,6 +65,98 @@ def _active_user_db_paths() -> list[tuple[str, Path]]:
     return out
 
 
+def fix_account_math() -> list[str]:
+    """Recalcula cash_balance y realized_pnl desde el historial de trades
+    (la fuente de verdad -- trades es append-only, nunca se reescribe) y
+    sobreescribe el cache en la tabla 'account' cuando no cuadra. 2026-10-05,
+    a pedido explicito ("que lo repare automatico sin que yo tenga que
+    hacerlo"): esto SI corrige datos de dinero solo, a diferencia del resto
+    de este archivo -- es seguro porque el valor nuevo es 100% determinista
+    (una suma sobre el historial, nada inventado), pero si el historial
+    mismo tiene un trade mal calculado (ej. el bug real de multiplicador de
+    venta no aplicado, 2026-09-08) esto corrige el SINTOMA, no esa causa --
+    por eso cada correccion devuelve el detalle completo antes/despues para
+    que se loguee visible y se pueda investigar igual.
+    Devuelve una descripcion por cada cuenta que corrigio (vacio si ninguna
+    hacia falta)."""
+    fixed = []
+    for username, db_path in _active_user_db_paths():
+        conn = _connect(db_path)
+        try:
+            account = conn.execute("SELECT * FROM account WHERE id = 1").fetchone()
+            if account is None:
+                continue
+            trades = conn.execute("SELECT * FROM trades ORDER BY id ASC").fetchall()
+            expected_cash = account["initial_balance"]
+            expected_realized = 0.0
+            for t in trades:
+                expected_cash += t["cash_effect"]
+                expected_realized += t["realized_pnl_delta"]
+            cash_diff = round(account["cash_balance"] - expected_cash, 2)
+            realized_diff = round(account["realized_pnl"] - expected_realized, 2)
+            if abs(cash_diff) > 0.01 or abs(realized_diff) > 0.01:
+                conn.execute(
+                    "UPDATE account SET cash_balance = ?, realized_pnl = ? WHERE id = 1",
+                    (expected_cash, expected_realized),
+                )
+                conn.commit()
+                fixed.append(
+                    f"[{username}] Corregido automaticamente -- cash ${account['cash_balance']:.2f} -> "
+                    f"${expected_cash:.2f} (diferencia que habia ${cash_diff:+.2f}), P&L realizado "
+                    f"${account['realized_pnl']:.2f} -> ${expected_realized:.2f} "
+                    f"(diferencia que habia ${realized_diff:+.2f}). Recalculado desde el historial de trades."
+                )
+        finally:
+            conn.close()
+    return fixed
+
+
+def fix_duplicate_positions() -> list[str]:
+    """'key' es PRIMARY KEY de la tabla positions (ver engine.py) -- SQLite
+    ya rechaza un insert con key repetida, asi que esto en la practica
+    nunca encuentra nada (defensa en profundidad para un bug de
+    migracion/manipulacion manual que violara el esquema). Si alguna vez
+    aparece, se asume que ambas filas son LA MISMA posicion partida en dos
+    registros por error y se fusionan: cantidad = suma, costo promedio =
+    promedio ponderado por cantidad, se conserva la fecha de apertura mas
+    antigua -- se loguea el detalle de las filas originales por si en
+    realidad eran 2 posiciones distintas que no debian fusionarse."""
+    fixed = []
+    for username, db_path in _active_user_db_paths():
+        conn = _connect(db_path)
+        try:
+            dupe_keys = [r["key"] for r in conn.execute(
+                "SELECT key, COUNT(*) as n FROM positions GROUP BY key HAVING n > 1"
+            ).fetchall()]
+            for key in dupe_keys:
+                rows = conn.execute(
+                    "SELECT rowid, * FROM positions WHERE key = ? ORDER BY opened_at ASC", (key,)
+                ).fetchall()
+                total_qty = sum(r["quantity"] for r in rows)
+                avg_cost = (
+                    sum(r["quantity"] * r["avg_cost"] for r in rows) / total_qty
+                    if total_qty else rows[0]["avg_cost"]
+                )
+                keep_rowid = rows[0]["rowid"]
+                other_rowids = [r["rowid"] for r in rows[1:]]
+                conn.execute(
+                    "UPDATE positions SET quantity = ?, avg_cost = ? WHERE rowid = ?",
+                    (total_qty, avg_cost, keep_rowid),
+                )
+                conn.executemany(
+                    "DELETE FROM positions WHERE rowid = ?", [(r,) for r in other_rowids]
+                )
+                conn.commit()
+                detail = "; ".join(f"qty={r['quantity']} avg_cost={r['avg_cost']}" for r in rows)
+                fixed.append(
+                    f"[{username}] Posiciones duplicadas fusionadas para key={key}: "
+                    f"qty total={total_qty}, avg_cost ponderado=${avg_cost:.4f}. Filas originales: {detail}."
+                )
+        finally:
+            conn.close()
+    return fixed
+
+
 def check_account_math() -> list[str]:
     """Cash actual + costo de posiciones abiertas (a avg_cost) debe cuadrar
     con: balance inicial - suma de compras + suma de ventas. Se verifica
