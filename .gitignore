@@ -14,6 +14,9 @@ venv/
 .env
 *.env
 
+# Backups manuales ad-hoc (antes de tener git en el servidor, 2026-10-11)
+*.bak-*
+
 # Otros
 .DS_Store
 Thumbs.db
